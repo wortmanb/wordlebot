@@ -134,7 +134,7 @@ def main():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--quiet", action="store_false", dest="usage", 
-        default=True, help="Print usage message")
+        default=True, help="Don't print the handy dandy usage message")
     args = parser.parse_args()
 
     wb = Wordlebot()
