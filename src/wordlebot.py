@@ -122,9 +122,6 @@ Next guesses: cling, clink, clung, count, icing
                 if letter not in word:
                     matched = True
                     break
-            if matched:
-                self.wordlist.remove(word)
-                continue
             candidates.append(word)
         return candidates
 
@@ -148,7 +145,7 @@ def main():
         solutions = wb.solve(response)
         sol = ', '.join(solutions)
         print(f'Next guesses: {sol}')
-        if len(solutions) == 1:
+        if len(solutions) <= 1:
             break 
 
 if __name__ == '__main__':
