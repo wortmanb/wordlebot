@@ -20,7 +20,7 @@ class Wordlebot:
     guesses and builds a (hopefully) ever-shortening list of possible next
     words, using only those from the canonical word list.
     """
-    def __init__(self):
+    def __init__(self, debug: bool):
         """
         Create a new wordlebot
         """
@@ -28,6 +28,7 @@ class Wordlebot:
         self.pattern = ['.'] * 5
         self.known = []
         self.bad = []
+        self.debug = debug
         with open(WORDLIST, 'r') as input:
             self.wordlist = [ word.strip() for word in input.readlines()]
 
@@ -87,9 +88,10 @@ Next guesses: cling, clink, clung, count, icing
                     self.known.remove(letter)
                 if letter in self.bad:
                     self.bad.remove(letter)
-        # print(f'pattern: {self.pattern}')
-        # print(f'known: {self.known}')
-        # print(f'bad: {self.bad}')
+        if self.debug:
+            print(f'pattern: {self.pattern}')
+            print(f'known: {self.known}')
+            print(f'bad: {self.bad}')
 
 
     def solve(self, response: str) -> list[str]:
@@ -106,23 +108,44 @@ Next guesses: cling, clink, clung, count, icing
         self.assess(response)
         candidates = []
         for word in self.wordlist:
-            if not re.match(''.join(self.pattern), word):
-                self.wordlist.remove(word)
+            if self.debug:
+                print(f'Considering {word}')
+            # Does it match the pattern?
+            pattern = ''.join(self.pattern)
+            if not re.match(pattern, word):
+                if self.debug:
+                    print(f' {word} does not match {pattern}')
+                # self.wordlist.remove(word)
                 continue
+            # Does it contain any letters in the bad letter list?
             matched = False
             for letter in word:
                 if letter in self.bad:
+                    if self.debug:
+                        print(f' {word} contains "{letter}" but shouldn\'t')
                     matched = True
                     break
             if matched:
-                self.wordlist.remove(word)
+                # self.wordlist.remove(word)
                 continue
-            matched = False
+            # Now, are all the letters in the known list present in the word?
+            violated = False
+            print(word)
             for letter in self.known:
                 if letter not in word:
-                    matched = True
+                    if self.debug:
+                        print(f' {word} does not contain "{letter}"')
+                    violated = True
                     break
-            candidates.append(word)
+            if violated:
+                if self.debug:
+                    print(f'Removing {word}')
+                # self.wordlist.remove(word)
+            else:
+                candidates.append(word)
+        if self.debug:
+            print(f'candidates: {candidates}')
+        self.wordlist = candidates
         return candidates
 
 def main():
@@ -132,9 +155,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--quiet", action="store_false", dest="usage", 
         default=True, help="Don't print the handy dandy usage message")
+    parser.add_argument("--debug", "-d", action="store_true", dest="debug",
+        default=False, help="Print extra debugging output")
     args = parser.parse_args()
 
-    wb = Wordlebot()
+    wb = Wordlebot(args.debug)
     if args.usage:
         print(wb.help_msg())
 
@@ -144,7 +169,8 @@ def main():
         response = input("Enter response: ")
         solutions = wb.solve(response)
         sol = ', '.join(solutions)
-        print(f'Next guesses: {sol}')
+        count = len(solutions)
+        print(f'There are {count} possible guesses: {sol}')
         if len(solutions) <= 1:
             break 
 
