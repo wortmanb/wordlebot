@@ -25,7 +25,7 @@ Hahahahahahaha. Right.
 
 ## Roadmap
 
-I'd love to reimplement the wordlist using a tree, but clearly not for performance reasons. I just think it'd be cool.
+I'd love to reimplement the wordlist using a tree, to facilitate selecting the candidate word that has the greatest chance of eliminating the most words if it's incorrect.
 
 ## Authors and acknowledgment
 
