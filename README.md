@@ -29,7 +29,7 @@ I'd love to reimplement the wordlist using a tree, but clearly not for performan
 
 ## Authors and acknowledgment
 
-Bret Wortman
+Bret Wortman, (C) 2022
 
 ## License
 
