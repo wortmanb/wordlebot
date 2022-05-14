@@ -6,6 +6,8 @@
 import argparse
 import re
 import os
+import numpy as np 
+import networkx as nx
 
 VALIDATION = '^[a-zA-Z\?]{5}$'
 HOME = os.environ.get('HOME')
@@ -130,7 +132,6 @@ Next guesses: cling, clink, clung, count, icing
                 continue
             # Now, are all the letters in the known list present in the word?
             violated = False
-            print(word)
             for letter in self.known:
                 if letter not in word:
                     if self.debug:
