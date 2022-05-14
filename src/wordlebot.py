@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
 #
 # Wordlebot
-# 
-# 
+#
+#
 import argparse
 import re
 import os
-import numpy as np 
-import networkx as nx
 
-VALIDATION = '^[a-zA-Z\?]{5}$'
+VALIDATION = '^[a-zA-Z?]{5}$'
 HOME = os.environ.get('HOME')
 WORDLIST = f'{HOME}/git/wordlebot/data/wordlist'
+
 
 class Wordlebot:
     """
     This class describes a wordlebot.
-    
+
     Since Wordle uses a restricted list of words which does not include all
     possible 5-letter words, this Wordlebot takes the response to a series of
     guesses and builds a (hopefully) ever-shortening list of possible next
     words, using only those from the canonical word list.
     """
+
     def __init__(self, debug: bool):
         """
         Create a new wordlebot
@@ -32,7 +32,7 @@ class Wordlebot:
         self.bad = []
         self.debug = debug
         with open(WORDLIST, 'r') as input:
-            self.wordlist = [ word.strip() for word in input.readlines()]
+            self.wordlist = [word.strip() for word in input.readlines()]
 
     def help_msg(self):
         """
@@ -41,7 +41,7 @@ class Wordlebot:
 
         return """
 Wordlebot helps focus guesses by restricting the universe of 5-letter words
-to just those on the Wordlebot word list. Enter guesses as a string of 
+to just those on the Wordlebot word list. Enter guesses as a string of
 lowercase letters, then give the response by adding green letters as capitals,
 yellow letters as lowercase, and others as '?' or some other non-letter
 character.
