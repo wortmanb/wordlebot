@@ -6,6 +6,7 @@
 import argparse
 import re
 import os
+import re
 
 VALIDATION = '^[a-zA-Z?]{5}$'
 HOME = os.environ.get('HOME')
@@ -23,6 +24,10 @@ class KnownLetters:
         Constructs a new instance.
         """
         self.data = {}
+
+    def __repr__(self):
+        rep = 'KnownLetters( ' + str(self.data) + ' )'
+        return rep
 
     def store(self, letter: str, index: int):
         """
@@ -236,15 +241,13 @@ Next guesses: cling, clink, clung, count, icing
                     self.log(f' {word} does not contain "{letter}"')
                     violated = True
                     break
-                index = word.find(letter)
-                if self.known.has_letter_at_index(letter, index):
-                    self.log(f' {word} contains {letter} at {index}')
-                    violated = True
-                    break
-            if violated:
-                self.log(f'Removing {word}')
-                # self.wordlist.remove(word)
-            else:
+                for index in [_.start() for _ in re.finditer(letter, word)]:
+                    if self.known.has_letter_at_index(letter, index):
+                        self.log(f' {word} contains {letter} at {index}')
+                        violated = True
+                        break
+            if not violated:
+                self.log(f'{word} is still a candidate')
                 candidates.append(word)
         self.log(f'candidates: {candidates}')
         self.wordlist = candidates
@@ -256,7 +259,7 @@ def main():
     Main function
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--quiet", action="store_false", dest="usage",
+    parser.add_argument("--quiet", "-q", action="store_false", dest="usage",
                         default=True,
                         help="Don't print the handy dandy usage message")
     parser.add_argument("--debug", "-d", action="store_true", dest="debug",
