@@ -121,8 +121,8 @@ class Wordlebot:
         self.known = KnownLetters()
         self.bad = []
         self.debug = debug
-        with open(WORDLIST, 'r') as input:
-            self.wordlist = [word.strip() for word in input.readlines()]
+        with open(WORDLIST, 'r') as fp:
+            self.wordlist = [word.strip() for word in fp.readlines()]
 
     def help_msg(self):
         """
