@@ -6,7 +6,6 @@
 import argparse
 import re
 import os
-import re
 
 VALIDATION = '^[a-zA-Z?]{5}$'
 HOME = os.environ.get('HOME')
@@ -262,6 +261,9 @@ def main():
     parser.add_argument("--quiet", "-q", action="store_false", dest="usage",
                         default=True,
                         help="Don't print the handy dandy usage message")
+    parser.add_argument("--crane", "-c", action="store_true", dest="crane",
+                        default=False,
+                        help="Use crane as our initial guess")
     parser.add_argument("--debug", "-d", action="store_true", dest="debug",
                         default=False, help="Print extra debugging output")
     args = parser.parse_args()
@@ -270,14 +272,20 @@ def main():
     if args.usage:
         print(wb.help_msg())
 
+    i = 1
     while True:
-        guess = input("Enter guess: ")
+        if i == 1 and args.crane:
+            guess = "crane"
+            print('Using default initial guess "crane"')
+        else:
+            guess = input(f'{i} | Guess: ')
         wb.guess(guess)
-        response = input("Enter response: ")
+        response = input(f'{i} | Response: ')
         solutions = wb.solve(response)
         sol = ', '.join(solutions)
         count = len(solutions)
-        print(f'There are {count} possible guesses: {sol}')
+        print(f'{i} | There are {count} possible guesses: {sol}')
+        i += 1
         if len(solutions) <= 1:
             break
 
