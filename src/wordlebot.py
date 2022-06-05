@@ -284,10 +284,12 @@ def main():
         solutions = wb.solve(response)
         sol = ', '.join(solutions)
         count = len(solutions)
-        print(f'{i} | There are {count} possible guesses: {sol}')
-        i += 1
         if len(solutions) <= 1:
+            print(f'Solved in {i+1} guesses: {sol}')
             break
+        else:
+            print(f'{i} | There are {count} possible guesses: {sol}')
+            i += 1
 
 
 if __name__ == '__main__':
