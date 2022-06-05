@@ -14,10 +14,11 @@ Clone the repository into $HOME/git/. You can clone it elsewhere, but will need 
 usage: wordlebot.py [-h] [--quiet]
 
 optional arguments:
-  -h, --help  show this help message and exit
-  --quiet     Don't print the handy dandy usage message
+  -h, --help   Show this help message and exit
+  -q, --quiet  Don't print the handy dandy usage message
+  -c, --crane  Use the standard first guess, "crane"
 
-Wordlebot will prompt for your first guess and the response from Wordle before giving you a list of possible next words.
+Wordlebot will prompt for your first guess (unless you invoke with "-c") and the response from Wordle before giving you a list of possible next words.
 
 ## Support
 
