@@ -7,6 +7,7 @@ import argparse
 import re
 import os
 import csv
+import shutil
 from collections import Counter
 
 VALIDATION = '^[a-zA-Z?]{5}$'
@@ -424,6 +425,7 @@ Next guesses: cling, clink, clung, count, icing
     def display_candidates(self, candidates: list[str], max_display: int = 20, show_all: bool = False) -> str:
         """
         Format and display candidates in a user-friendly way, sorted by frequency.
+        Uses full terminal width for better display.
 
         :param      candidates:   The candidates
         :type       candidates:   list[str]
@@ -447,6 +449,17 @@ Next guesses: cling, clink, clung, count, icing
         scored_candidates.sort(key=lambda x: x[1], reverse=True)
         candidates = [word for word, _ in scored_candidates]
         
+        # Get terminal width, default to 80 if unable to determine
+        try:
+            terminal_width = shutil.get_terminal_size().columns
+        except:
+            terminal_width = 80
+            
+        # Calculate how many words fit per row
+        # Each word needs space for the word plus some padding
+        word_width = 8  # 5 chars for word + 3 for spacing
+        words_per_row = max(1, (terminal_width - 2) // word_width)  # -2 for indentation
+        
         # Display logic based on number of candidates
         if count <= 5:
             # Show frequency info for small lists
@@ -460,14 +473,15 @@ Next guesses: cling, clink, clung, count, icing
             return f"Candidates ({count}): {', '.join(result_parts)}"
         
         elif count <= max_display or show_all:
-            # Group by rows for better readability
+            # Group by rows for better readability using full terminal width
             display_count = count if show_all else min(count, max_display)
             display_candidates = candidates[:display_count]
             
             rows = []
-            for i in range(0, display_count, 5):
-                row = display_candidates[i:i+5]
-                rows.append("  " + " ".join(f"{word:<8}" for word in row))
+            for i in range(0, display_count, words_per_row):
+                row = display_candidates[i:i+words_per_row]
+                formatted_row = "  " + " ".join(f"{word:<7}" for word in row)
+                rows.append(formatted_row)
             
             title = f"All candidates ({count}):" if show_all else f"Candidates ({count}):"
             result = title + "\n" + "\n".join(rows)
@@ -478,16 +492,19 @@ Next guesses: cling, clink, clung, count, icing
             
             return result
         else:
-            # Show top recommendations plus count
-            top_candidates = candidates[:10]
+            # Show top recommendations plus count using full terminal width
+            top_count = min(words_per_row * 3, count)  # Show 3 rows worth
+            top_candidates = candidates[:top_count]
+            
             rows = []
-            for i in range(0, 10, 5):
-                row = top_candidates[i:i+5]
-                rows.append("  " + " ".join(f"{word:<8}" for word in row))
+            for i in range(0, top_count, words_per_row):
+                row = top_candidates[i:i+words_per_row]
+                formatted_row = "  " + " ".join(f"{word:<7}" for word in row)
+                rows.append(formatted_row)
             
             result = f"Top recommendations ({count} total):\n" + "\n".join(rows)
-            if count > 10:
-                result += f"\n  ... and {count - 10} more candidates"
+            if count > top_count:
+                result += f"\n  ... and {count - top_count} more candidates"
                 result += "\n  (Enter 'm' or 'more' to see all candidates)"
             return result
 
