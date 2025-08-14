@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 #
-# Wordlebot
+# Wordlebot - Enhanced Version
 #
 #
 import argparse
 import re
 import os
+from collections import Counter
 
 VALIDATION = '^[a-zA-Z?]{5}$'
 HOME = os.environ.get('HOME')
@@ -132,8 +133,8 @@ class Wordlebot:
         """
         Return a help/usage message.
 
-        :returns:   { description_of_the_return_value }
-        :rtype:     { return_type_description }
+        :returns:   Help message string
+        :rtype:     str
         """
 
         return """
@@ -202,6 +203,38 @@ Next guesses: cling, clink, clung, count, icing
         self.log(f'known: {self.known}')
         self.log(f'bad: {self.bad}')
 
+    def score_word(self, word: str) -> int:
+        """
+        Score a word based on letter frequency and uniqueness.
+        Higher scores indicate potentially better guesses.
+
+        :param      word:  The word to score
+        :type       word:  str
+
+        :returns:   Score for the word
+        :rtype:     int
+        """
+        # Common letter frequencies in English (approximate)
+        letter_freq = {
+            'e': 12, 't': 9, 'a': 8, 'o': 7, 'i': 7, 'n': 6, 's': 6, 'h': 6,
+            'r': 6, 'd': 4, 'l': 4, 'c': 3, 'u': 3, 'm': 2, 'w': 2, 'f': 2,
+            'g': 2, 'y': 2, 'p': 2, 'b': 1, 'v': 1, 'k': 1, 'j': 1, 'x': 1,
+            'q': 1, 'z': 1
+        }
+        
+        score = 0
+        unique_letters = set(word)
+        
+        # Bonus for unique letters (avoid repeated letters early on)
+        if len(unique_letters) == 5:
+            score += 10
+        
+        # Add frequency scores
+        for letter in unique_letters:
+            score += letter_freq.get(letter, 0)
+            
+        return score
+
     def solve(self, response: str) -> list[str]:
         """
         Look for words that make good candidates given this response and prior
@@ -221,7 +254,6 @@ Next guesses: cling, clink, clung, count, icing
             pattern = ''.join(self.pattern)
             if not re.match(pattern, word):
                 self.log(f' {word} does not match {pattern}')
-                # self.wordlist.remove(word)
                 continue
             # Does it contain any letters in the bad letter list?
             matched = False
@@ -231,7 +263,6 @@ Next guesses: cling, clink, clung, count, icing
                     matched = True
                     break
             if matched:
-                # self.wordlist.remove(word)
                 continue
             # Now, are all the letters in the known list present in the word?
             violated = False
@@ -248,9 +279,72 @@ Next guesses: cling, clink, clung, count, icing
             if not violated:
                 self.log(f'{word} is still a candidate')
                 candidates.append(word)
+        
         self.log(f'candidates: {candidates}')
         self.wordlist = candidates
         return candidates
+
+    def display_candidates(self, candidates: list[str], max_display: int = 20, show_all: bool = False) -> str:
+        """
+        Format and display candidates in a user-friendly way.
+
+        :param      candidates:   The candidates
+        :type       candidates:   list[str]
+        :param      max_display:  Maximum number to display initially
+        :type       max_display:  int
+        :param      show_all:     Whether to show all candidates
+        :type       show_all:     bool
+
+        :returns:   Formatted string of candidates
+        :rtype:     str
+        """
+        count = len(candidates)
+        
+        if count == 0:
+            return "No candidates found!"
+        elif count == 1:
+            return f"Solution: {candidates[0]}"
+        
+        # Sort candidates by score (best first) if there are many
+        if count > 5:
+            scored_candidates = [(word, self.score_word(word)) for word in candidates]
+            scored_candidates.sort(key=lambda x: x[1], reverse=True)
+            candidates = [word for word, _ in scored_candidates]
+        
+        # Display logic based on number of candidates
+        if count <= 5:
+            return f"Candidates ({count}): {' '.join(candidates)}"
+        elif count <= max_display or show_all:
+            # Group by rows for better readability
+            display_count = count if show_all else min(count, max_display)
+            display_candidates = candidates[:display_count]
+            
+            rows = []
+            for i in range(0, display_count, 5):
+                row = display_candidates[i:i+5]
+                rows.append("  " + " ".join(f"{word:<6}" for word in row))
+            
+            title = f"All candidates ({count}):" if show_all else f"Candidates ({count}):"
+            result = title + "\n" + "\n".join(rows)
+            
+            if not show_all and count > max_display:
+                result += f"\n  ... and {count - max_display} more candidates"
+                result += "\n  (Enter 'm' or 'more' to see all candidates)"
+            
+            return result
+        else:
+            # Show top recommendations plus count
+            top_candidates = candidates[:10]
+            rows = []
+            for i in range(0, 10, 5):
+                row = top_candidates[i:i+5]
+                rows.append("  " + " ".join(f"{word:<6}" for word in row))
+            
+            result = f"Top recommendations ({count} total):\n" + "\n".join(rows)
+            if count > 10:
+                result += f"\n  ... and {count - 10} more candidates"
+                result += "\n  (Enter 'm' or 'more' to see all candidates)"
+            return result
 
 
 def main():
@@ -266,6 +360,8 @@ def main():
                         help="Use crane as our initial guess")
     parser.add_argument("--debug", "-d", action="store_true", dest="debug",
                         default=False, help="Print extra debugging output")
+    parser.add_argument("--max-display", "-m", type=int, default=20,
+                        help="Maximum number of candidates to display in detail")
     args = parser.parse_args()
 
     wb = Wordlebot(args.debug)
@@ -273,23 +369,48 @@ def main():
         print(wb.help_msg())
 
     i = 1
+    current_candidates = []
+    
     while True:
         if i == 1 and args.crane:
             guess = "crane"
             print('Using default initial guess "crane"')
         else:
             guess = input(f'{i} | Guess: ')
+        
+        # Check for special commands
+        if guess.lower() in ['m', 'more']:
+            if current_candidates:
+                print(f'{i} | {wb.display_candidates(current_candidates, args.max_display, show_all=True)}')
+            else:
+                print("No candidates to display")
+            continue
+        
+        if not guess or len(guess) != 5:
+            print("Please enter a 5-letter word")
+            continue
+            
         wb.guess(guess)
         response = input(f'{i} | Response: ')
-        solutions = wb.solve(response)
-        sol = ', '.join(solutions)
-        count = len(solutions)
-        if len(solutions) <= 1:
-            print(f'Solved in {i+1} guesses: {sol}')
-            break
-        else:
-            print(f'{i} | There are {count} possible guesses: {sol}')
-            i += 1
+        
+        if not response or len(response) != 5:
+            print("Please enter a 5-character response")
+            continue
+            
+        try:
+            solutions = wb.solve(response)
+            current_candidates = solutions
+            print(f'{i} | {wb.display_candidates(solutions, args.max_display)}')
+            
+            if len(solutions) <= 1:
+                if len(solutions) == 1:
+                    print(f'Solved in {i+1} guesses!')
+                break
+            else:
+                i += 1
+        except Exception as e:
+            print(f"Error processing response: {e}")
+            print("Please check your response format and try again")
 
 
 if __name__ == '__main__':
