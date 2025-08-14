@@ -9,6 +9,9 @@ files:
   # Path to the COCA frequency data (relative to HOME or absolute path)
   coca_frequency: "git/wordlebot/data/coca_frequency.csv"
   
+  # URL or path to previously used Wordle words (optional)
+  previous_wordle_words: "https://eagerterrier.github.io/previous-wordle-words/alphabetical.txt"
+  
   # Alternative: you can use absolute paths like:
   # wordlist: "/home/username/wordlebot/data/wordlist_fives.txt"
   # coca_frequency: "/home/username/wordlebot/data/coca_frequency.csv"
@@ -80,7 +83,14 @@ validation:
   debug_sample_size: 1000        # Number of rows to check when analyzing CSV
   debug_show_samples: 5          # Number of sample words to show in debug mode
 
-# Default behavior
+# Wordle-specific settings
+wordle:
+  # Starting from which guess number to exclude previously used words
+  exclude_previous_from_guess: 3
+  
+  # Cache duration for downloaded previous words list (in seconds)
+  # 86400 = 1 day, 604800 = 1 week
+  cache_duration: 604800
 defaults:
   # Default initial guess (if --crane flag used)
   initial_guess: "crane"

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Wordlebot - Enhanced Version with COCA Frequency Data and YAML Configuration
+# Wordlebot - Enhanced Version with COCA Frequency Data, YAML Configuration, and Previous Word Exclusion
 #
 #
 import argparse
@@ -9,6 +9,8 @@ import os
 import csv
 import shutil
 import yaml
+import urllib.request
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -37,7 +39,8 @@ def load_config():
     return {
         'files': {
             'wordlist': 'git/wordlebot/data/wordlist_fives.txt',
-            'coca_frequency': 'git/wordlebot/data/coca_frequency.csv'
+            'coca_frequency': 'git/wordlebot/data/coca_frequency.csv',
+            'previous_wordle_words': 'https://eagerterrier.github.io/previous-wordle-words/alphabetical.txt'
         },
         'data_format': {
             'coca_word_column': 'lemma',
@@ -62,6 +65,10 @@ def load_config():
                 'q': 1, 'z': 1
             }
         },
+        'wordle': {
+            'exclude_previous_from_guess': 3,
+            'cache_duration': 604800
+        },
         'validation': {
             'input_pattern': '^[a-zA-Z?]{5}$',
             'debug_sample_size': 1000,
@@ -76,10 +83,11 @@ def load_config():
 
 def resolve_path(path_str):
     """Resolve a path that might be relative to HOME"""
-    if os.path.isabs(path_str):
-        return path_str
+    path = Path(path_str)
+    if path.is_absolute():
+        return path
     else:
-        return os.path.join(HOME, path_str)
+        return Path.home() / path
 
 
 class KnownLetters:
@@ -95,8 +103,7 @@ class KnownLetters:
         self.data = {}
 
     def __repr__(self):
-        rep = 'KnownLetters( ' + str(self.data) + ' )'
-        return rep
+        return f'KnownLetters({self.data})'
 
     def store(self, letter: str, index: int):
         """
@@ -107,16 +114,14 @@ class KnownLetters:
         :param      index:   The index
         :type       index:   int
         """
-        if letter not in self.data.keys():
-            self.data[letter] = []
-        self.data[letter].append(index)
+        self.data.setdefault(letter, []).append(index)
 
-    def keys(self) -> list[str]:
+    def keys(self):
         """
-        Return a list of all keys
+        Return a view of all keys
 
-        :returns:   List of current keys
-        :rtype:     List of str
+        :returns:   View of current keys
+        :rtype:     dict_keys
         """
         return self.data.keys()
 
@@ -139,7 +144,7 @@ class KnownLetters:
         :returns:   True or False
         :rtype:     bool
         """
-        return letter in self.data.keys()
+        return letter in self.data
 
     def has_letter_at_index(self, letter: str, index: int) -> bool:
         """
@@ -153,9 +158,7 @@ class KnownLetters:
         :returns:   True or False
         :rtype:     bool
         """
-        if self.has_letter(letter):
-            return index in self.data[letter]
-        return False
+        return index in self.data.get(letter, [])
 
     def indices(self, letter: str) -> list[int]:
         """
@@ -168,18 +171,17 @@ class KnownLetters:
         :returns:   Prior locations
         :rtype:     List of integers
         """
-        if self.has_letter(letter):
-            return self.data[letter]
-        return []
+        return self.data.get(letter, [])
 
 
 class Wordlebot:
     """
     This class describes a wordlebot.
 
-    This Wordlebot takes the response to a series of guesses and builds a
-    (hopefully) ever-shortening list of possible next words, using only those
-    from the canonical word list.
+    Since Wordle uses a restricted list of words which does not include all
+    possible 5-letter words, this Wordlebot takes the response to a series of
+    guesses and builds a (hopefully) ever-shortening list of possible next
+    words, using only those from the canonical word list.
     """
 
     def __init__(self, debug: bool, config_path: str = None):
@@ -205,14 +207,18 @@ class Wordlebot:
         self.known = KnownLetters()
         self.bad = []
         self.word_frequencies = {}
+        self.previous_wordle_words = set()
+        self.guess_number = 0
         
         # Load wordlist
         wordlist_path = resolve_path(self.config['files']['wordlist'])
-        with open(wordlist_path, 'r') as fp:
-            self.wordlist = [word.strip() for word in fp.readlines()]
+        self.wordlist = [word.strip() for word in wordlist_path.read_text().splitlines()]
             
         # Load COCA frequency data
         self._load_frequency_data()
+        
+        # Load previous Wordle words
+        self._load_previous_wordle_words()
 
     def _load_frequency_data(self):
         """
@@ -344,6 +350,64 @@ class Wordlebot:
             self.log(f'Traceback: {traceback.format_exc()}')
             self.log('Falling back to basic letter frequency scoring')
 
+    def _load_previous_wordle_words(self):
+        """
+        Load the list of previously used Wordle words to exclude from suggestions.
+        """
+        source = self.config['files'].get('previous_wordle_words')
+        if not source:
+            self.log('No previous Wordle words source configured')
+            return
+            
+        try:
+            if source.startswith('http'):
+                # Download from URL with caching
+                cache_dir = os.path.join(HOME, '.cache', 'wordlebot')
+                os.makedirs(cache_dir, exist_ok=True)
+                cache_file = os.path.join(cache_dir, 'previous_wordle_words.txt')
+                
+                # Check if cache exists and is recent enough
+                cache_duration = self.config['wordle']['cache_duration']
+                should_download = True
+                
+                if os.path.exists(cache_file):
+                    cache_age = time.time() - os.path.getmtime(cache_file)
+                    if cache_age < cache_duration:
+                        should_download = False
+                        self.log(f'Using cached previous words (age: {cache_age/3600:.1f} hours)')
+                
+                if should_download:
+                    self.log(f'Downloading previous Wordle words from {source}')
+                    urllib.request.urlretrieve(source, cache_file)
+                    self.log('Download complete')
+                
+                # Read from cache file
+                with open(cache_file, 'r', encoding=self.config['defaults']['file_encoding']) as fp:
+                    content = fp.read()
+            else:
+                # Read from local file
+                file_path = resolve_path(source)
+                with open(file_path, 'r', encoding=self.config['defaults']['file_encoding']) as fp:
+                    content = fp.read()
+            
+            # Process the content - convert to lowercase and filter 5-letter words
+            words = content.strip().split('\n')
+            for word in words:
+                word = word.strip().lower()
+                if len(word) == 5 and word.isalpha():
+                    self.previous_wordle_words.add(word)
+            
+            self.log(f'Loaded {len(self.previous_wordle_words)} previous Wordle words')
+            
+            # Show first few for debugging
+            if self.debug and self.previous_wordle_words:
+                sample = list(self.previous_wordle_words)[:5]
+                self.log(f'Sample previous words: {sample}')
+                
+        except Exception as e:
+            self.log(f'Warning: Could not load previous Wordle words: {e}')
+            self.log('Continuing without previous word exclusion')
+
     def help_msg(self):
         """
         Return a help/usage message.
@@ -392,6 +456,7 @@ Next guesses: cling, clink, clung, count, icing
         :param      guess:  The guess
         :type       guess:  str
         """
+        self.guess_number += 1
         for letter in guess:
             if not self.known.has_letter(letter):
                 self.bad.append(letter)
@@ -474,37 +539,46 @@ Next guesses: cling, clink, clung, count, icing
         """
         self.assess(response)
         candidates = []
+        exclude_previous = self.guess_number >= self.config['wordle']['exclude_previous_from_guess']
+        excluded_count = 0
+        
         for word in self.wordlist:
             self.log(f'Considering {word}')
+            
+            # Check if word was previously used in Wordle (starting from guess #3)
+            if exclude_previous and word in self.previous_wordle_words:
+                self.log(f' {word} was previously used in Wordle, excluding')
+                excluded_count += 1
+                continue
+            
             # Does it match the pattern?
             pattern = ''.join(self.pattern)
             if not re.match(pattern, word):
                 self.log(f' {word} does not match {pattern}')
                 continue
             # Does it contain any letters in the bad letter list?
-            matched = False
-            for letter in word:
-                if letter in self.bad:
-                    self.log(f' {word} contains "{letter}" but shouldn\'t')
-                    matched = True
-                    break
-            if matched:
+            if any(letter in self.bad for letter in word):
+                bad_letter = next(letter for letter in word if letter in self.bad)
+                self.log(f' {word} contains "{bad_letter}" but shouldn\'t')
                 continue
             # Now, are all the letters in the known list present in the word?
-            violated = False
-            for letter in self.known.keys():
-                if letter not in word:
-                    self.log(f' {word} does not contain "{letter}"')
-                    violated = True
-                    break
-                for index in [_.start() for _ in re.finditer(letter, word)]:
-                    if self.known.has_letter_at_index(letter, index):
-                        self.log(f' {word} contains {letter} at {index}')
-                        violated = True
-                        break
-            if not violated:
-                self.log(f'{word} is still a candidate')
-                candidates.append(word)
+            if not all(letter in word for letter in self.known.keys()):
+                missing_letter = next(letter for letter in self.known.keys() if letter not in word)
+                self.log(f' {word} does not contain "{missing_letter}"')
+                continue
+                
+            # Check if any known letters are in forbidden positions
+            if any(self.known.has_letter_at_index(letter, pos) 
+                   for letter in self.known.keys()
+                   for pos in [m.start() for m in re.finditer(letter, word)]):
+                self.log(f' {word} has known letter in forbidden position')
+                continue
+                
+            self.log(f'{word} is still a candidate')
+            candidates.append(word)
+        
+        if exclude_previous and excluded_count > 0:
+            self.log(f'Excluded {excluded_count} previously used Wordle words')
         
         self.log(f'candidates: {candidates}')
         self.wordlist = candidates
@@ -529,6 +603,7 @@ Next guesses: cling, clink, clung, count, icing
             max_display = self.config['display']['max_display']
             
         count = len(candidates)
+        exclude_previous = self.guess_number >= self.config['wordle']['exclude_previous_from_guess']
         
         if count == 0:
             return "No candidates found!"
@@ -576,6 +651,8 @@ Next guesses: cling, clink, clung, count, icing
                 rows.append(formatted_row)
             
             title = f"All candidates ({count}):" if show_all else f"Candidates ({count}):"
+            if exclude_previous:
+                title += " (excluding previous Wordle words)"
             result = title + "\n" + "\n".join(rows)
             
             if not show_all and count > max_display:
@@ -594,7 +671,10 @@ Next guesses: cling, clink, clung, count, icing
                 formatted_row = "  " + " ".join(f"{word:<7}" for word in row)
                 rows.append(formatted_row)
             
-            result = f"Top recommendations ({count} total):\n" + "\n".join(rows)
+            if exclude_previous:
+                result = f"Top recommendations ({count} total, excluding previous Wordle words):\n" + "\n".join(rows)
+            else:
+                result = f"Top recommendations ({count} total):\n" + "\n".join(rows)
             if count > top_count:
                 result += f"\n  ... and {count - top_count} more candidates"
                 result += "\n  (Enter 'm' or 'more' to see all candidates)"
