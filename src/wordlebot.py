@@ -749,7 +749,7 @@ def main() -> None:
             
             if len(solutions) <= 1:
                 if len(solutions) == 1:
-                    print(f'Solved in {i+1} guesses!')
+                    print(f'Solved in {i} guesses!')
                 break
             else:
                 i += 1
