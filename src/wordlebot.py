@@ -177,10 +177,9 @@ class Wordlebot:
     """
     This class describes a wordlebot.
 
-    Since Wordle uses a restricted list of words which does not include all
-    possible 5-letter words, this Wordlebot takes the response to a series of
-    guesses and builds a (hopefully) ever-shortening list of possible next
-    words, using only those from the canonical word list.
+    This Wordlebot takes the response to a series of guesses and builds a
+    (hopefully) ever-shortening list of possible next words, using only those
+    from the canonical word list.
     """
 
     def __init__(self, debug: bool, config_path: str = None):
