@@ -11,10 +11,11 @@ import yaml
 import urllib.request
 import time
 from pathlib import Path
+from typing import Dict, List, Set, Optional, Tuple, Any, Union
 
-HOME = str(Path.home())
+HOME: str = str(Path.home())
 
-def load_config():
+def load_config() -> Dict[str, Any]:
     """Load configuration from YAML file"""
     config_paths = [
         Path('wordlebot_config.yaml'),
@@ -79,7 +80,7 @@ def load_config():
         }
     }
 
-def resolve_path(path_str):
+def resolve_path(path_str: str) -> Path:
     """Resolve a path that might be relative to HOME"""
     path = Path(path_str)
     if path.is_absolute():
@@ -94,13 +95,13 @@ class KnownLetters:
     we know each word is not.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Constructs a new instance.
         """
-        self.data = {}
+        self.data: Dict[str, List[int]] = {}
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f'KnownLetters({self.data})'
 
     def store(self, letter: str, index: int):
@@ -123,7 +124,7 @@ class KnownLetters:
         """
         return self.data.keys()
 
-    def remove(self, letter: str):
+    def remove(self, letter: str) -> None:
         """
         Removes the specified letter.
 
@@ -182,7 +183,7 @@ class Wordlebot:
     words, using only those from the canonical word list.
     """
 
-    def __init__(self, debug: bool, config_path: str = None):
+    def __init__(self, debug: bool, config_path: Optional[str] = None) -> None:
         """
         Create a new wordlebot
 
@@ -191,7 +192,8 @@ class Wordlebot:
         :param      config_path:  Optional path to config file
         :type       config_path:  str
         """
-        self.debug = debug
+        self.debug: bool = debug
+        self.config: Dict[str, Any]
         
         # Load configuration
         if config_path and Path(config_path).exists():
@@ -201,12 +203,13 @@ class Wordlebot:
             self.config = load_config()
         
         # Initialize wordlebot state
-        self.pattern = ['.'] * 5
-        self.known = KnownLetters()
-        self.bad = []
-        self.word_frequencies = {}
-        self.previous_wordle_words = set()
-        self.guess_number = 0
+        self.pattern: List[str] = ['.'] * 5
+        self.known: KnownLetters = KnownLetters()
+        self.bad: List[str] = []
+        self.word_frequencies: Dict[str, int] = {}
+        self.previous_wordle_words: Set[str] = set()
+        self.guess_number: int = 0
+        self.wordlist: List[str]
         
         # Load wordlist
         wordlist_path = resolve_path(self.config['files']['wordlist'])
@@ -218,7 +221,7 @@ class Wordlebot:
         # Load previous Wordle words
         self._load_previous_wordle_words()
 
-    def _load_frequency_data(self):
+    def _load_frequency_data(self) -> None:
         """
         Load word frequency data from COCA CSV file.
         Handles various CSV formats with better debugging.
@@ -348,7 +351,7 @@ class Wordlebot:
             self.log(f'Traceback: {traceback.format_exc()}')
             self.log('Falling back to basic letter frequency scoring')
 
-    def _load_previous_wordle_words(self):
+    def _load_previous_wordle_words(self) -> None:
         """
         Load the list of previously used Wordle words to exclude from suggestions.
         """
@@ -404,7 +407,7 @@ class Wordlebot:
             self.log(f'Warning: Could not load previous Wordle words: {e}')
             self.log('Continuing without previous word exclusion')
 
-    def help_msg(self):
+    def help_msg(self) -> str:
         """
         Return a help/usage message.
 
@@ -434,7 +437,7 @@ Next guesses: cling, clink, clung, count, icing
 
 """
 
-    def log(self, message: str):
+    def log(self, message: str) -> None:
         """
         Internal logging method
 
@@ -444,7 +447,7 @@ Next guesses: cling, clink, clung, count, icing
         if self.debug:
             print(message)
 
-    def guess(self, guess: str):
+    def guess(self, guess: str) -> None:
         """
         Handle this guess by adding each letter to the bad list for now. They
         can be removed during assessment of the response
@@ -457,7 +460,7 @@ Next guesses: cling, clink, clung, count, icing
             if not self.known.has_letter(letter):
                 self.bad.append(letter)
 
-    def assess(self, response: str):
+    def assess(self, response: str) -> None:
         """
         Assess the last response. Add any new greens to the pattern and any new
         yellows to the known list. This does not yet do anything to track
@@ -522,7 +525,7 @@ Next guesses: cling, clink, clung, count, icing
             
         return base_score
 
-    def solve(self, response: str) -> list[str]:
+    def solve(self, response: str) -> List[str]:
         """
         Look for words that make good candidates given this response and prior
         ones as well.
@@ -580,7 +583,7 @@ Next guesses: cling, clink, clung, count, icing
         self.wordlist = candidates
         return candidates
 
-    def display_candidates(self, candidates: list[str], max_display: int = None, show_all: bool = False) -> str:
+    def display_candidates(self, candidates: List[str], max_display: Optional[int] = None, show_all: bool = False) -> str:
         """
         Format and display candidates in a user-friendly way, sorted by frequency.
         Uses full terminal width for better display.
@@ -677,7 +680,7 @@ Next guesses: cling, clink, clung, count, icing
             return result
 
 
-def main():
+def main() -> None:
     """
     Main function
     """
