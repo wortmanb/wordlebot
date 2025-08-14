@@ -9,7 +9,7 @@ import os
 
 VALIDATION = '^[a-zA-Z?]{5}$'
 HOME = os.environ.get('HOME')
-WORDLIST = f'{HOME}/git/wordlebot/data/wordlist'
+WORDLIST = f'{HOME}/git/wordlebot/data/wordlist_fives.txt'
 
 
 class KnownLetters:
