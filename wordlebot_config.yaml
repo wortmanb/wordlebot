@@ -1,0 +1,92 @@
+# Wordlebot Configuration File
+# This file contains all configurable settings for the Wordlebot
+
+# File paths
+files:
+  # Path to the 5-letter word list (relative to HOME or absolute path)
+  wordlist: "git/wordlebot/data/wordlist_fives.txt"
+  
+  # Path to the COCA frequency data (relative to HOME or absolute path)
+  coca_frequency: "git/wordlebot/data/coca_frequency.csv"
+  
+  # Alternative: you can use absolute paths like:
+  # wordlist: "/home/username/wordlebot/data/wordlist_fives.txt"
+  # coca_frequency: "/home/username/wordlebot/data/coca_frequency.csv"
+
+# Data format settings
+data_format:
+  # Expected columns in the COCA frequency file
+  coca_word_column: "lemma"      # Column name containing the words
+  coca_freq_column: "freq"       # Column name containing frequencies
+  coca_word_column_index: 1      # Fallback: column index for words (0-based)
+  coca_freq_column_index: 3      # Fallback: column index for frequencies (0-based)
+  
+  # CSV delimiter (auto-detected if not specified)
+  csv_delimiter: ","             # Can be ",", "\t", ";", "|", or "auto"
+
+# Display settings
+display:
+  # Maximum number of candidates to show initially
+  max_display: 20
+  
+  # Terminal width settings
+  min_terminal_width: 40         # Minimum assumed terminal width
+  default_terminal_width: 80     # Default if detection fails
+  word_display_width: 8          # Space allocated per word in display
+  
+  # Show frequency counts for small candidate lists
+  show_frequencies_threshold: 5   # Show frequencies when <= this many candidates
+
+# Scoring settings
+scoring:
+  # Bonus multiplier for words with all unique letters
+  unique_letters_bonus: 1.1      # 10% bonus for 5 unique letters
+  
+  # Fallback letter frequency scores (when COCA data unavailable)
+  letter_frequencies:
+    e: 12
+    t: 9
+    a: 8
+    o: 7
+    i: 7
+    n: 6
+    s: 6
+    h: 6
+    r: 6
+    d: 4
+    l: 4
+    c: 3
+    u: 3
+    m: 2
+    w: 2
+    f: 2
+    g: 2
+    y: 2
+    p: 2
+    b: 1
+    v: 1
+    k: 1
+    j: 1
+    x: 1
+    q: 1
+    z: 1
+
+# Validation settings
+validation:
+  # Regex pattern for valid guess/response input
+  input_pattern: "^[a-zA-Z?]{5}$"
+  
+  # Debug settings
+  debug_sample_size: 1000        # Number of rows to check when analyzing CSV
+  debug_show_samples: 5          # Number of sample words to show in debug mode
+
+# Default behavior
+defaults:
+  # Default initial guess (if --crane flag used)
+  initial_guess: "crane"
+  
+  # Whether to show help message by default
+  show_help: true
+  
+  # Encoding for file reading
+  file_encoding: "utf-8"

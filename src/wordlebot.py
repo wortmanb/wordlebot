@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Wordlebot - Enhanced Version with COCA Frequency Data
+# Wordlebot - Enhanced Version with COCA Frequency Data and YAML Configuration
 #
 #
 import argparse
@@ -8,12 +8,78 @@ import re
 import os
 import csv
 import shutil
+import yaml
 from collections import Counter
+from pathlib import Path
 
-VALIDATION = '^[a-zA-Z?]{5}$'
 HOME = os.environ.get('HOME')
-WORDLIST = f'{HOME}/git/wordlebot/data/wordlist_fives.txt'
-COCA_FREQUENCY = f'{HOME}/git/wordlebot/data/coca_frequency.csv'
+
+def load_config():
+    """Load configuration from YAML file"""
+    config_paths = [
+        'wordlebot_config.yaml',
+        os.path.join(HOME, 'git/wordlebot/wordlebot_config.yaml'),
+        os.path.join(HOME, '.config/wordlebot/config.yaml'),
+        '/etc/wordlebot/config.yaml'
+    ]
+    
+    for config_path in config_paths:
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r') as f:
+                    return yaml.safe_load(f)
+            except Exception as e:
+                print(f"Warning: Could not load config from {config_path}: {e}")
+                continue
+    
+    # Return default config if no file found
+    print("Warning: No config file found, using defaults")
+    return {
+        'files': {
+            'wordlist': 'git/wordlebot/data/wordlist_fives.txt',
+            'coca_frequency': 'git/wordlebot/data/coca_frequency.csv'
+        },
+        'data_format': {
+            'coca_word_column': 'lemma',
+            'coca_freq_column': 'freq',
+            'coca_word_column_index': 1,
+            'coca_freq_column_index': 3,
+            'csv_delimiter': ','
+        },
+        'display': {
+            'max_display': 20,
+            'min_terminal_width': 40,
+            'default_terminal_width': 80,
+            'word_display_width': 8,
+            'show_frequencies_threshold': 5
+        },
+        'scoring': {
+            'unique_letters_bonus': 1.1,
+            'letter_frequencies': {
+                'e': 12, 't': 9, 'a': 8, 'o': 7, 'i': 7, 'n': 6, 's': 6, 'h': 6,
+                'r': 6, 'd': 4, 'l': 4, 'c': 3, 'u': 3, 'm': 2, 'w': 2, 'f': 2,
+                'g': 2, 'y': 2, 'p': 2, 'b': 1, 'v': 1, 'k': 1, 'j': 1, 'x': 1,
+                'q': 1, 'z': 1
+            }
+        },
+        'validation': {
+            'input_pattern': '^[a-zA-Z?]{5}$',
+            'debug_sample_size': 1000,
+            'debug_show_samples': 5
+        },
+        'defaults': {
+            'initial_guess': 'crane',
+            'show_help': True,
+            'file_encoding': 'utf-8'
+        }
+    }
+
+def resolve_path(path_str):
+    """Resolve a path that might be relative to HOME"""
+    if os.path.isabs(path_str):
+        return path_str
+    else:
+        return os.path.join(HOME, path_str)
 
 
 class KnownLetters:
@@ -117,22 +183,33 @@ class Wordlebot:
     words, using only those from the canonical word list.
     """
 
-    def __init__(self, debug: bool):
+    def __init__(self, debug: bool, config_path: str = None):
         """
         Create a new wordlebot
 
-        :param      debug:  The debug
-        :type       debug:  bool
+        :param      debug:        The debug flag
+        :type       debug:        bool
+        :param      config_path:  Optional path to config file
+        :type       config_path:  str
         """
-        # print(f'"{partial}"')
+        self.debug = debug
+        
+        # Load configuration
+        if config_path and os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                self.config = yaml.safe_load(f)
+        else:
+            self.config = load_config()
+        
+        # Initialize wordlebot state
         self.pattern = ['.'] * 5
         self.known = KnownLetters()
         self.bad = []
-        self.debug = debug
         self.word_frequencies = {}
         
         # Load wordlist
-        with open(WORDLIST, 'r') as fp:
+        wordlist_path = resolve_path(self.config['files']['wordlist'])
+        with open(wordlist_path, 'r') as fp:
             self.wordlist = [word.strip() for word in fp.readlines()]
             
         # Load COCA frequency data
@@ -143,24 +220,32 @@ class Wordlebot:
         Load word frequency data from COCA CSV file.
         Handles various CSV formats with better debugging.
         """
-        if not os.path.exists(COCA_FREQUENCY):
-            self.log(f'Warning: Could not find COCA frequency file at {COCA_FREQUENCY}')
+        coca_path = resolve_path(self.config['files']['coca_frequency'])
+        
+        if not os.path.exists(coca_path):
+            self.log(f'Warning: Could not find COCA frequency file at {coca_path}')
             self.log('Falling back to basic letter frequency scoring')
             return
             
         try:
-            # First, detect the delimiter by examining the first line
-            with open(COCA_FREQUENCY, 'r', encoding='utf-8') as fp:
-                first_line = fp.readline().strip()
-                
-            # Count potential delimiters
-            delimiters = [',', '\t', ';', '|']
-            delimiter_counts = {delim: first_line.count(delim) for delim in delimiters}
-            best_delimiter = max(delimiter_counts.items(), key=lambda x: x[1])[0]
+            # Get delimiter from config or detect it
+            config_delimiter = self.config['data_format'].get('csv_delimiter', 'auto')
             
-            self.log(f'Detected delimiter: {repr(best_delimiter)} (count: {delimiter_counts[best_delimiter]})')
+            if config_delimiter == 'auto':
+                # Auto-detect delimiter by examining the first line
+                with open(coca_path, 'r', encoding=self.config['defaults']['file_encoding']) as fp:
+                    first_line = fp.readline().strip()
+                    
+                # Count potential delimiters
+                delimiters = [',', '\t', ';', '|']
+                delimiter_counts = {delim: first_line.count(delim) for delim in delimiters}
+                best_delimiter = max(delimiter_counts.items(), key=lambda x: x[1])[0]
+                self.log(f'Auto-detected delimiter: {repr(best_delimiter)} (count: {delimiter_counts[best_delimiter]})')
+            else:
+                best_delimiter = config_delimiter
+                self.log(f'Using configured delimiter: {repr(best_delimiter)}')
             
-            with open(COCA_FREQUENCY, 'r', encoding='utf-8') as fp:
+            with open(coca_path, 'r', encoding=self.config['defaults']['file_encoding']) as fp:
                 reader = csv.reader(fp, delimiter=best_delimiter)
                 first_row = next(reader)
                 
@@ -170,10 +255,10 @@ class Wordlebot:
                 has_header = False
                 if len(first_row) >= 2:
                     try:
-                        int(first_row[1])  # Try to parse second column as number
+                        int(first_row[self.config['data_format']['coca_freq_column_index']])
                         has_header = False
                         self.log('First row appears to be data (no header)')
-                    except ValueError:
+                    except (ValueError, IndexError):
                         has_header = True
                         self.log('First row appears to be header')
                 
@@ -185,33 +270,38 @@ class Wordlebot:
                     headers = next(reader)
                     self.log(f'Headers: {headers}')
                     
-                    # Find word and frequency columns - look for specific COCA column names
-                    word_col_idx = 1  # Default to 'lemma' column
-                    freq_col_idx = 3  # Default to 'freq' column
+                    # Find word and frequency columns using config
+                    word_col_idx = self.config['data_format']['coca_word_column_index']
+                    freq_col_idx = self.config['data_format']['coca_freq_column_index']
+                    
+                    # Try to find by name first
+                    word_col_name = self.config['data_format']['coca_word_column']
+                    freq_col_name = self.config['data_format']['coca_freq_column']
                     
                     for i, header in enumerate(headers):
-                        header_lower = header.lower()
-                        if header_lower in ['lemma', 'word']:
+                        if header.lower() == word_col_name.lower():
                             word_col_idx = i
-                        elif header_lower in ['freq', 'frequency']:
+                        elif header.lower() == freq_col_name.lower():
                             freq_col_idx = i
                             
-                    self.log(f'Using column {word_col_idx} ({headers[word_col_idx]}) for words, column {freq_col_idx} ({headers[freq_col_idx]}) for frequencies')
+                    self.log(f'Using column {word_col_idx} ({headers[word_col_idx] if word_col_idx < len(headers) else "unknown"}) for words')
+                    self.log(f'Using column {freq_col_idx} ({headers[freq_col_idx] if freq_col_idx < len(headers) else "unknown"}) for frequencies')
                 else:
-                    word_col_idx = 1  # COCA format: column 1 is 'lemma'
-                    freq_col_idx = 3  # COCA format: column 3 is 'freq'
-                    self.log(f'No header detected, using COCA format: columns 1 and 3 for lemma and frequency')
+                    word_col_idx = self.config['data_format']['coca_word_column_index']
+                    freq_col_idx = self.config['data_format']['coca_freq_column_index']
+                    self.log(f'No header detected, using configured indices: columns {word_col_idx} and {freq_col_idx}')
                 
                 # Process data rows
                 loaded_count = 0
                 total_rows = 0
                 five_letter_count = 0
+                debug_samples = self.config['validation']['debug_show_samples']
                 
                 for row in reader:
                     total_rows += 1
                     
                     # Debug: show first few rows
-                    if total_rows <= 3:
+                    if total_rows <= debug_samples:
                         self.log(f'Row {total_rows}: {row}')
                     
                     if len(row) > max(word_col_idx, freq_col_idx):
@@ -219,7 +309,7 @@ class Wordlebot:
                         freq_str = row[freq_col_idx].strip()
                         
                         # Debug: show what we're trying to process
-                        if total_rows <= 3:
+                        if total_rows <= debug_samples:
                             self.log(f'  Extracted word: "{word}" (len={len(word)}), freq: "{freq_str}"')
                         
                         if len(word) == 5 and word.isalpha():
@@ -230,14 +320,14 @@ class Wordlebot:
                                 loaded_count += 1
                                 
                                 # Log first few successful loads for debugging
-                                if loaded_count <= 5:
+                                if loaded_count <= debug_samples:
                                     self.log(f'Successfully loaded: {word} -> {frequency}')
                                     
                             except (ValueError, IndexError) as e:
-                                if loaded_count <= 5:  # Only log first few errors
+                                if loaded_count <= debug_samples:  # Only log first few errors
                                     self.log(f'Could not parse frequency for "{word}": "{freq_str}" ({e})')
                         else:
-                            if total_rows <= 3:
+                            if total_rows <= debug_samples:
                                 self.log(f'  Rejected word: "{word}" (len={len(word)}, isalpha={word.isalpha()})')
                                 
                 self.log(f'Processed {total_rows} total rows')
@@ -246,7 +336,7 @@ class Wordlebot:
                 
                 if loaded_count > 0:
                     # Show some sample frequencies for verification
-                    sample_words = list(self.word_frequencies.items())[:5]
+                    sample_words = list(self.word_frequencies.items())[:debug_samples]
                     self.log(f'Sample frequencies: {sample_words}')
                 
         except Exception as e:
@@ -272,6 +362,10 @@ character.
 
 Words are ranked by frequency data from the Corpus of Contemporary American
 English (COCA), putting more common words first.
+
+Commands:
+  - Enter 'm' or 'more' to see all candidates
+  - Enter 'q' or 'quit' to exit the application
 
 Example:
 
@@ -314,8 +408,9 @@ Next guesses: cling, clink, clung, count, icing
 
         :raises     AssertionError:  { exception_description }
         """
+        input_pattern = self.config['validation']['input_pattern']
         assert len(response) == 5
-        assert re.match(VALIDATION, response)
+        assert re.match(input_pattern, response)
         for idx, letter in enumerate(list(response)):
             if re.match('[a-z]', letter):
                 self.known.store(letter, idx)
@@ -348,14 +443,7 @@ Next guesses: cling, clink, clung, count, icing
         
         # If no COCA data available, fall back to letter frequency
         if base_score == 0:
-            # Common letter frequencies in English (approximate)
-            letter_freq = {
-                'e': 12, 't': 9, 'a': 8, 'o': 7, 'i': 7, 'n': 6, 's': 6, 'h': 6,
-                'r': 6, 'd': 4, 'l': 4, 'c': 3, 'u': 3, 'm': 2, 'w': 2, 'f': 2,
-                'g': 2, 'y': 2, 'p': 2, 'b': 1, 'v': 1, 'k': 1, 'j': 1, 'x': 1,
-                'q': 1, 'z': 1
-            }
-            
+            letter_freq = self.config['scoring']['letter_frequencies']
             unique_letters = set(word)
             
             # Bonus for unique letters (avoid repeated letters early on)
@@ -369,7 +457,8 @@ Next guesses: cling, clink, clung, count, icing
             # For COCA frequencies, add bonus for unique letters
             unique_letters = set(word)
             if len(unique_letters) == 5:
-                base_score = int(base_score * 1.1)  # 10% bonus for unique letters
+                bonus_multiplier = self.config['scoring']['unique_letters_bonus']
+                base_score = int(base_score * bonus_multiplier)
             
         return base_score
 
@@ -422,7 +511,7 @@ Next guesses: cling, clink, clung, count, icing
         self.wordlist = candidates
         return candidates
 
-    def display_candidates(self, candidates: list[str], max_display: int = 20, show_all: bool = False) -> str:
+    def display_candidates(self, candidates: list[str], max_display: int = None, show_all: bool = False) -> str:
         """
         Format and display candidates in a user-friendly way, sorted by frequency.
         Uses full terminal width for better display.
@@ -437,6 +526,9 @@ Next guesses: cling, clink, clung, count, icing
         :returns:   Formatted string of candidates
         :rtype:     str
         """
+        if max_display is None:
+            max_display = self.config['display']['max_display']
+            
         count = len(candidates)
         
         if count == 0:
@@ -449,19 +541,20 @@ Next guesses: cling, clink, clung, count, icing
         scored_candidates.sort(key=lambda x: x[1], reverse=True)
         candidates = [word for word, _ in scored_candidates]
         
-        # Get terminal width, default to 80 if unable to determine
+        # Get terminal width from config
         try:
             terminal_width = shutil.get_terminal_size().columns
+            terminal_width = max(terminal_width, self.config['display']['min_terminal_width'])
         except:
-            terminal_width = 80
+            terminal_width = self.config['display']['default_terminal_width']
             
         # Calculate how many words fit per row
-        # Each word needs space for the word plus some padding
-        word_width = 8  # 5 chars for word + 3 for spacing
+        word_width = self.config['display']['word_display_width']
         words_per_row = max(1, (terminal_width - 2) // word_width)  # -2 for indentation
         
         # Display logic based on number of candidates
-        if count <= 5:
+        freq_threshold = self.config['display']['show_frequencies_threshold']
+        if count <= freq_threshold:
             # Show frequency info for small lists
             result_parts = []
             for word in candidates:
@@ -514,20 +607,27 @@ def main():
     Main function
     """
     parser = argparse.ArgumentParser()
+    parser.add_argument("--config", "-c", type=str, default=None,
+                        help="Path to configuration file")
     parser.add_argument("--quiet", "-q", action="store_false", dest="usage",
                         default=True,
                         help="Don't print the handy dandy usage message")
-    parser.add_argument("--crane", "-c", action="store_true", dest="crane",
+    parser.add_argument("--crane", action="store_true", dest="crane",
                         default=False,
                         help="Use crane as our initial guess")
     parser.add_argument("--debug", "-d", action="store_true", dest="debug",
                         default=False, help="Print extra debugging output")
-    parser.add_argument("--max-display", "-m", type=int, default=20,
-                        help="Maximum number of candidates to display in detail")
+    parser.add_argument("--max-display", "-m", type=int, default=None,
+                        help="Maximum number of candidates to display in detail (overrides config)")
     args = parser.parse_args()
 
-    wb = Wordlebot(args.debug)
-    if args.usage:
+    wb = Wordlebot(args.debug, args.config)
+    
+    # Override config with command line args if provided
+    if args.max_display is not None:
+        wb.config['display']['max_display'] = args.max_display
+    
+    if args.usage and wb.config['defaults']['show_help']:
         print(wb.help_msg())
 
     i = 1
@@ -535,15 +635,19 @@ def main():
     
     while True:
         if i == 1 and args.crane:
-            guess = "crane"
-            print('Using default initial guess "crane"')
+            guess = wb.config['defaults']['initial_guess']
+            print(f'Using default initial guess "{guess}"')
         else:
             guess = input(f'{i} | Guess: ')
         
         # Check for special commands
-        if guess.lower() in ['m', 'more']:
+        if guess.lower() in ['q', 'quit']:
+            print("Goodbye!")
+            break
+        elif guess.lower() in ['m', 'more']:
             if current_candidates:
-                print(f'{i} | {wb.display_candidates(current_candidates, args.max_display, show_all=True)}')
+                max_display = wb.config['display']['max_display']
+                print(f'{i} | {wb.display_candidates(current_candidates, max_display, show_all=True)}')
             else:
                 print("No candidates to display")
             continue
@@ -562,7 +666,8 @@ def main():
         try:
             solutions = wb.solve(response)
             current_candidates = solutions
-            print(f'{i} | {wb.display_candidates(solutions, args.max_display)}')
+            max_display = wb.config['display']['max_display']
+            print(f'{i} | {wb.display_candidates(solutions, max_display)}')
             
             if len(solutions) <= 1:
                 if len(solutions) == 1:
