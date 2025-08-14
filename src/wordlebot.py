@@ -5,7 +5,6 @@
 #
 import argparse
 import re
-import os
 import csv
 import shutil
 import yaml
@@ -13,21 +12,21 @@ import urllib.request
 import time
 from pathlib import Path
 
-HOME = os.environ.get('HOME')
+HOME = str(Path.home())
 
 def load_config():
     """Load configuration from YAML file"""
     config_paths = [
-        'wordlebot_config.yaml',
-        os.path.join(HOME, 'git/wordlebot/wordlebot_config.yaml'),
-        os.path.join(HOME, '.config/wordlebot/config.yaml'),
-        '/etc/wordlebot/config.yaml'
+        Path('wordlebot_config.yaml'),
+        Path.home() / 'git/wordlebot/wordlebot_config.yaml',
+        Path.home() / '.config/wordlebot/config.yaml',
+        Path('/etc/wordlebot/config.yaml')
     ]
     
     for config_path in config_paths:
-        if os.path.exists(config_path):
+        if config_path.exists():
             try:
-                with open(config_path, 'r') as f:
+                with config_path.open('r') as f:
                     return yaml.safe_load(f)
             except Exception as e:
                 print(f"Warning: Could not load config from {config_path}: {e}")
@@ -131,7 +130,7 @@ class KnownLetters:
         :param      letter:  The letter
         :type       letter:  str
         """
-        self.data.pop(letter)
+        self.data.pop(letter, None)
 
     def has_letter(self, letter: str) -> bool:
         """
@@ -195,8 +194,8 @@ class Wordlebot:
         self.debug = debug
         
         # Load configuration
-        if config_path and os.path.exists(config_path):
-            with open(config_path, 'r') as f:
+        if config_path and Path(config_path).exists():
+            with Path(config_path).open('r') as f:
                 self.config = yaml.safe_load(f)
         else:
             self.config = load_config()
@@ -211,7 +210,7 @@ class Wordlebot:
         
         # Load wordlist
         wordlist_path = resolve_path(self.config['files']['wordlist'])
-        self.wordlist = [word.strip() for word in wordlist_path.read_text().splitlines()]
+        self.wordlist = [word.strip() for word in wordlist_path.read_text().splitlines() if word.strip()]
             
         # Load COCA frequency data
         self._load_frequency_data()
@@ -226,7 +225,7 @@ class Wordlebot:
         """
         coca_path = resolve_path(self.config['files']['coca_frequency'])
         
-        if not os.path.exists(coca_path):
+        if not coca_path.exists():
             self.log(f'Warning: Could not find COCA frequency file at {coca_path}')
             self.log('Falling back to basic letter frequency scoring')
             return
@@ -237,7 +236,7 @@ class Wordlebot:
             
             if config_delimiter == 'auto':
                 # Auto-detect delimiter by examining the first line
-                with open(coca_path, 'r', encoding=self.config['defaults']['file_encoding']) as fp:
+                with coca_path.open('r', encoding=self.config['defaults']['file_encoding']) as fp:
                     first_line = fp.readline().strip()
                     
                 # Count potential delimiters
@@ -249,7 +248,7 @@ class Wordlebot:
                 best_delimiter = config_delimiter
                 self.log(f'Using configured delimiter: {repr(best_delimiter)}')
             
-            with open(coca_path, 'r', encoding=self.config['defaults']['file_encoding']) as fp:
+            with coca_path.open('r', encoding=self.config['defaults']['file_encoding']) as fp:
                 reader = csv.reader(fp, delimiter=best_delimiter)
                 first_row = next(reader)
                 
@@ -361,16 +360,16 @@ class Wordlebot:
         try:
             if source.startswith('http'):
                 # Download from URL with caching
-                cache_dir = os.path.join(HOME, '.cache', 'wordlebot')
-                os.makedirs(cache_dir, exist_ok=True)
-                cache_file = os.path.join(cache_dir, 'previous_wordle_words.txt')
+                cache_dir = Path.home() / '.cache' / 'wordlebot'
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                cache_file = cache_dir / 'previous_wordle_words.txt'
                 
                 # Check if cache exists and is recent enough
                 cache_duration = self.config['wordle']['cache_duration']
                 should_download = True
                 
-                if os.path.exists(cache_file):
-                    cache_age = time.time() - os.path.getmtime(cache_file)
+                if cache_file.exists():
+                    cache_age = time.time() - cache_file.stat().st_mtime
                     if cache_age < cache_duration:
                         should_download = False
                         self.log(f'Using cached previous words (age: {cache_age/3600:.1f} hours)')
@@ -381,13 +380,11 @@ class Wordlebot:
                     self.log('Download complete')
                 
                 # Read from cache file
-                with open(cache_file, 'r', encoding=self.config['defaults']['file_encoding']) as fp:
-                    content = fp.read()
+                content = cache_file.read_text(encoding=self.config['defaults']['file_encoding'])
             else:
                 # Read from local file
                 file_path = resolve_path(source)
-                with open(file_path, 'r', encoding=self.config['defaults']['file_encoding']) as fp:
-                    content = fp.read()
+                content = file_path.read_text(encoding=self.config['defaults']['file_encoding'])
             
             # Process the content - convert to lowercase and filter 5-letter words
             words = content.strip().split('\n')
@@ -474,7 +471,7 @@ Next guesses: cling, clink, clung, count, icing
         input_pattern = self.config['validation']['input_pattern']
         assert len(response) == 5
         assert re.match(input_pattern, response)
-        for idx, letter in enumerate(list(response)):
+        for idx, letter in enumerate(response):
             if re.match('[a-z]', letter):
                 self.known.store(letter, idx)
                 if letter in self.bad:
@@ -556,9 +553,9 @@ Next guesses: cling, clink, clung, count, icing
                 self.log(f' {word} does not match {pattern}')
                 continue
             # Does it contain any letters in the bad letter list?
-            if any(letter in self.bad for letter in word):
-                bad_letter = next(letter for letter in word if letter in self.bad)
-                self.log(f' {word} contains "{bad_letter}" but shouldn\'t')
+            bad_letters = [letter for letter in word if letter in self.bad]
+            if bad_letters:
+                self.log(f' {word} contains "{bad_letters[0]}" but shouldn\'t')
                 continue
             # Now, are all the letters in the known list present in the word?
             if not all(letter in word for letter in self.known.keys()):
