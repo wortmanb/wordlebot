@@ -11,7 +11,6 @@ import shutil
 import yaml
 import urllib.request
 import time
-from collections import Counter
 from pathlib import Path
 
 HOME = os.environ.get('HOME')
@@ -619,7 +618,7 @@ Next guesses: cling, clink, clung, count, icing
         try:
             terminal_width = shutil.get_terminal_size().columns
             terminal_width = max(terminal_width, self.config['display']['min_terminal_width'])
-        except:
+        except Exception:
             terminal_width = self.config['display']['default_terminal_width']
             
         # Calculate how many words fit per row
