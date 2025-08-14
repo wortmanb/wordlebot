@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 #
-# Wordlebot - Enhanced Version
+# Wordlebot - Enhanced Version with COCA Frequency Data
 #
 #
 import argparse
 import re
 import os
+import csv
 from collections import Counter
 
 VALIDATION = '^[a-zA-Z?]{5}$'
 HOME = os.environ.get('HOME')
 WORDLIST = f'{HOME}/git/wordlebot/data/wordlist_fives.txt'
+COCA_FREQUENCY = f'{HOME}/git/wordlebot/data/coca_frequency.csv'
 
 
 class KnownLetters:
@@ -126,8 +128,131 @@ class Wordlebot:
         self.known = KnownLetters()
         self.bad = []
         self.debug = debug
+        self.word_frequencies = {}
+        
+        # Load wordlist
         with open(WORDLIST, 'r') as fp:
             self.wordlist = [word.strip() for word in fp.readlines()]
+            
+        # Load COCA frequency data
+        self._load_frequency_data()
+
+    def _load_frequency_data(self):
+        """
+        Load word frequency data from COCA CSV file.
+        Handles various CSV formats with better debugging.
+        """
+        if not os.path.exists(COCA_FREQUENCY):
+            self.log(f'Warning: Could not find COCA frequency file at {COCA_FREQUENCY}')
+            self.log('Falling back to basic letter frequency scoring')
+            return
+            
+        try:
+            # First, detect the delimiter by examining the first line
+            with open(COCA_FREQUENCY, 'r', encoding='utf-8') as fp:
+                first_line = fp.readline().strip()
+                
+            # Count potential delimiters
+            delimiters = [',', '\t', ';', '|']
+            delimiter_counts = {delim: first_line.count(delim) for delim in delimiters}
+            best_delimiter = max(delimiter_counts.items(), key=lambda x: x[1])[0]
+            
+            self.log(f'Detected delimiter: {repr(best_delimiter)} (count: {delimiter_counts[best_delimiter]})')
+            
+            with open(COCA_FREQUENCY, 'r', encoding='utf-8') as fp:
+                reader = csv.reader(fp, delimiter=best_delimiter)
+                first_row = next(reader)
+                
+                self.log(f'First row ({len(first_row)} columns): {first_row[:5]}...' if len(first_row) > 5 else f'First row: {first_row}')
+                
+                # Check if first row looks like a header
+                has_header = False
+                if len(first_row) >= 2:
+                    try:
+                        int(first_row[1])  # Try to parse second column as number
+                        has_header = False
+                        self.log('First row appears to be data (no header)')
+                    except ValueError:
+                        has_header = True
+                        self.log('First row appears to be header')
+                
+                # Reset file pointer
+                fp.seek(0)
+                reader = csv.reader(fp, delimiter=best_delimiter)
+                
+                if has_header:
+                    headers = next(reader)
+                    self.log(f'Headers: {headers}')
+                    
+                    # Find word and frequency columns - look for specific COCA column names
+                    word_col_idx = 1  # Default to 'lemma' column
+                    freq_col_idx = 3  # Default to 'freq' column
+                    
+                    for i, header in enumerate(headers):
+                        header_lower = header.lower()
+                        if header_lower in ['lemma', 'word']:
+                            word_col_idx = i
+                        elif header_lower in ['freq', 'frequency']:
+                            freq_col_idx = i
+                            
+                    self.log(f'Using column {word_col_idx} ({headers[word_col_idx]}) for words, column {freq_col_idx} ({headers[freq_col_idx]}) for frequencies')
+                else:
+                    word_col_idx = 1  # COCA format: column 1 is 'lemma'
+                    freq_col_idx = 3  # COCA format: column 3 is 'freq'
+                    self.log(f'No header detected, using COCA format: columns 1 and 3 for lemma and frequency')
+                
+                # Process data rows
+                loaded_count = 0
+                total_rows = 0
+                five_letter_count = 0
+                
+                for row in reader:
+                    total_rows += 1
+                    
+                    # Debug: show first few rows
+                    if total_rows <= 3:
+                        self.log(f'Row {total_rows}: {row}')
+                    
+                    if len(row) > max(word_col_idx, freq_col_idx):
+                        word = row[word_col_idx].strip().lower()
+                        freq_str = row[freq_col_idx].strip()
+                        
+                        # Debug: show what we're trying to process
+                        if total_rows <= 3:
+                            self.log(f'  Extracted word: "{word}" (len={len(word)}), freq: "{freq_str}"')
+                        
+                        if len(word) == 5 and word.isalpha():
+                            five_letter_count += 1
+                            try:
+                                frequency = int(freq_str)
+                                self.word_frequencies[word] = frequency
+                                loaded_count += 1
+                                
+                                # Log first few successful loads for debugging
+                                if loaded_count <= 5:
+                                    self.log(f'Successfully loaded: {word} -> {frequency}')
+                                    
+                            except (ValueError, IndexError) as e:
+                                if loaded_count <= 5:  # Only log first few errors
+                                    self.log(f'Could not parse frequency for "{word}": "{freq_str}" ({e})')
+                        else:
+                            if total_rows <= 3:
+                                self.log(f'  Rejected word: "{word}" (len={len(word)}, isalpha={word.isalpha()})')
+                                
+                self.log(f'Processed {total_rows} total rows')
+                self.log(f'Found {five_letter_count} five-letter words')
+                self.log(f'Successfully loaded {loaded_count} word frequencies from COCA data')
+                
+                if loaded_count > 0:
+                    # Show some sample frequencies for verification
+                    sample_words = list(self.word_frequencies.items())[:5]
+                    self.log(f'Sample frequencies: {sample_words}')
+                
+        except Exception as e:
+            self.log(f'Error loading COCA frequency data: {e}')
+            import traceback
+            self.log(f'Traceback: {traceback.format_exc()}')
+            self.log('Falling back to basic letter frequency scoring')
 
     def help_msg(self):
         """
@@ -143,6 +268,9 @@ to just those on the Wordlebot word list. Enter guesses as a string of
 lowercase letters, then give the response by adding green letters as capitals,
 yellow letters as lowercase, and others as '?' or some other non-letter
 character.
+
+Words are ranked by frequency data from the Corpus of Contemporary American
+English (COCA), putting more common words first.
 
 Example:
 
@@ -205,7 +333,7 @@ Next guesses: cling, clink, clung, count, icing
 
     def score_word(self, word: str) -> int:
         """
-        Score a word based on letter frequency and uniqueness.
+        Score a word based on COCA frequency data and letter uniqueness.
         Higher scores indicate potentially better guesses.
 
         :param      word:  The word to score
@@ -214,26 +342,35 @@ Next guesses: cling, clink, clung, count, icing
         :returns:   Score for the word
         :rtype:     int
         """
-        # Common letter frequencies in English (approximate)
-        letter_freq = {
-            'e': 12, 't': 9, 'a': 8, 'o': 7, 'i': 7, 'n': 6, 's': 6, 'h': 6,
-            'r': 6, 'd': 4, 'l': 4, 'c': 3, 'u': 3, 'm': 2, 'w': 2, 'f': 2,
-            'g': 2, 'y': 2, 'p': 2, 'b': 1, 'v': 1, 'k': 1, 'j': 1, 'x': 1,
-            'q': 1, 'z': 1
-        }
+        # Start with COCA frequency if available
+        base_score = self.word_frequencies.get(word, 0)
         
-        score = 0
-        unique_letters = set(word)
-        
-        # Bonus for unique letters (avoid repeated letters early on)
-        if len(unique_letters) == 5:
-            score += 10
-        
-        # Add frequency scores
-        for letter in unique_letters:
-            score += letter_freq.get(letter, 0)
+        # If no COCA data available, fall back to letter frequency
+        if base_score == 0:
+            # Common letter frequencies in English (approximate)
+            letter_freq = {
+                'e': 12, 't': 9, 'a': 8, 'o': 7, 'i': 7, 'n': 6, 's': 6, 'h': 6,
+                'r': 6, 'd': 4, 'l': 4, 'c': 3, 'u': 3, 'm': 2, 'w': 2, 'f': 2,
+                'g': 2, 'y': 2, 'p': 2, 'b': 1, 'v': 1, 'k': 1, 'j': 1, 'x': 1,
+                'q': 1, 'z': 1
+            }
             
-        return score
+            unique_letters = set(word)
+            
+            # Bonus for unique letters (avoid repeated letters early on)
+            if len(unique_letters) == 5:
+                base_score += 50
+            
+            # Add frequency scores
+            for letter in unique_letters:
+                base_score += letter_freq.get(letter, 0)
+        else:
+            # For COCA frequencies, add bonus for unique letters
+            unique_letters = set(word)
+            if len(unique_letters) == 5:
+                base_score = int(base_score * 1.1)  # 10% bonus for unique letters
+            
+        return base_score
 
     def solve(self, response: str) -> list[str]:
         """
@@ -286,7 +423,7 @@ Next guesses: cling, clink, clung, count, icing
 
     def display_candidates(self, candidates: list[str], max_display: int = 20, show_all: bool = False) -> str:
         """
-        Format and display candidates in a user-friendly way.
+        Format and display candidates in a user-friendly way, sorted by frequency.
 
         :param      candidates:   The candidates
         :type       candidates:   list[str]
@@ -305,15 +442,23 @@ Next guesses: cling, clink, clung, count, icing
         elif count == 1:
             return f"Solution: {candidates[0]}"
         
-        # Sort candidates by score (best first) if there are many
-        if count > 5:
-            scored_candidates = [(word, self.score_word(word)) for word in candidates]
-            scored_candidates.sort(key=lambda x: x[1], reverse=True)
-            candidates = [word for word, _ in scored_candidates]
+        # Always sort candidates by score (best first)
+        scored_candidates = [(word, self.score_word(word)) for word in candidates]
+        scored_candidates.sort(key=lambda x: x[1], reverse=True)
+        candidates = [word for word, _ in scored_candidates]
         
         # Display logic based on number of candidates
         if count <= 5:
-            return f"Candidates ({count}): {' '.join(candidates)}"
+            # Show frequency info for small lists
+            result_parts = []
+            for word in candidates:
+                freq = self.word_frequencies.get(word, 0)
+                if freq > 0:
+                    result_parts.append(f"{word} ({freq:,})")
+                else:
+                    result_parts.append(word)
+            return f"Candidates ({count}): {', '.join(result_parts)}"
+        
         elif count <= max_display or show_all:
             # Group by rows for better readability
             display_count = count if show_all else min(count, max_display)
@@ -322,7 +467,7 @@ Next guesses: cling, clink, clung, count, icing
             rows = []
             for i in range(0, display_count, 5):
                 row = display_candidates[i:i+5]
-                rows.append("  " + " ".join(f"{word:<6}" for word in row))
+                rows.append("  " + " ".join(f"{word:<8}" for word in row))
             
             title = f"All candidates ({count}):" if show_all else f"Candidates ({count}):"
             result = title + "\n" + "\n".join(rows)
@@ -338,7 +483,7 @@ Next guesses: cling, clink, clung, count, icing
             rows = []
             for i in range(0, 10, 5):
                 row = top_candidates[i:i+5]
-                rows.append("  " + " ".join(f"{word:<6}" for word in row))
+                rows.append("  " + " ".join(f"{word:<8}" for word in row))
             
             result = f"Top recommendations ({count} total):\n" + "\n".join(rows)
             if count > 10:
