@@ -206,6 +206,7 @@ class Wordlebot:
         self.pattern: List[str] = ['.'] * 5
         self.known: KnownLetters = KnownLetters()
         self.bad: List[str] = []
+        self.min_letter_counts: Dict[str, int] = {}  # Minimum required count of each letter
         self.word_frequencies: Dict[str, int] = {}
         self.previous_wordle_words: Set[str] = set()
         self.guess_number: int = 0
@@ -463,8 +464,7 @@ Next guesses: cling, clink, clung, count, icing
     def assess(self, response: str) -> None:
         """
         Assess the last response. Add any new greens to the pattern and any new
-        yellows to the known list. This does not yet do anything to track
-        letters known to not be part of the solution.
+        yellows to the known list. Handle multiple instances of letters correctly.
 
         :param      response:        The response
         :type       response:        str
@@ -474,21 +474,36 @@ Next guesses: cling, clink, clung, count, icing
         input_pattern = self.config['validation']['input_pattern']
         assert len(response) == 5
         assert re.match(input_pattern, response)
+        
+        # Track which letters have yellow or green responses and count them
+        letters_in_target = set()
+        letter_count = {}
+        
+        # First pass: process greens and yellows, collect letters and count them
         for idx, letter in enumerate(response):
-            if re.match('[a-z]', letter):
+            if re.match('[a-z]', letter):  # Yellow letter
                 self.known.store(letter, idx)
-                if letter in self.bad:
-                    self.bad.remove(letter)
-            if re.match('[A-Z]', letter):
-                letter = letter.lower()
-                self.pattern[idx] = letter
-                if letter in self.known.keys():
-                    self.known.remove(letter)
-                if letter in self.bad:
-                    self.bad.remove(letter)
+                letters_in_target.add(letter)
+                letter_count[letter] = letter_count.get(letter, 0) + 1
+            elif re.match('[A-Z]', letter):  # Green letter
+                letter_lower = letter.lower()
+                self.pattern[idx] = letter_lower
+                letters_in_target.add(letter_lower)
+                letter_count[letter_lower] = letter_count.get(letter_lower, 0) + 1
+        
+        # Second pass: remove all instances of letters from bad list if they're in target
+        for letter in letters_in_target:
+            while letter in self.bad:
+                self.bad.remove(letter)
+        
+        # Third pass: update minimum letter counts
+        for letter, count in letter_count.items():
+            self.min_letter_counts[letter] = max(self.min_letter_counts.get(letter, 0), count)
+                
         self.log(f'pattern: {self.pattern}')
         self.log(f'known: {self.known}')
         self.log(f'bad: {self.bad}')
+        self.log(f'min_letter_counts: {self.min_letter_counts}')
 
     def score_word(self, word: str) -> int:
         """
@@ -572,6 +587,22 @@ Next guesses: cling, clink, clung, count, icing
                    for pos in [m.start() for m in re.finditer(letter, word)]):
                 self.log(f' {word} has known letter in forbidden position')
                 continue
+            
+            # Check if word meets minimum letter count requirements
+            word_letter_counts = {}
+            for letter in word:
+                word_letter_counts[letter] = word_letter_counts.get(letter, 0) + 1
+            
+            meets_min_counts = True
+            for letter, min_count in self.min_letter_counts.items():
+                actual_count = word_letter_counts.get(letter, 0)
+                if actual_count < min_count:
+                    self.log(f' {word} has only {actual_count} {letter}(s), needs at least {min_count}')
+                    meets_min_counts = False
+                    break
+            
+            if not meets_min_counts:
+                continue
                 
             self.log(f'{word} is still a candidate')
             candidates.append(word)
@@ -638,9 +669,9 @@ Next guesses: cling, clink, clung, count, icing
                     result_parts.append(word)
             return f"Candidates ({count}): {', '.join(result_parts)}"
         
-        elif count <= max_display or show_all:
+        elif max_display is None or count <= max_display or show_all:
             # Group by rows for better readability using full terminal width
-            display_count = count if show_all else min(count, max_display)
+            display_count = count if show_all else min(count, max_display or count)
             display_candidates = candidates[:display_count]
             
             rows = []
@@ -654,7 +685,7 @@ Next guesses: cling, clink, clung, count, icing
                 title += " (excluding previous Wordle words)"
             result = title + "\n" + "\n".join(rows)
             
-            if not show_all and count > max_display:
+            if not show_all and max_display is not None and count > max_display:
                 result += f"\n  ... and {count - max_display} more candidates"
                 result += "\n  (Enter 'm' or 'more' to see all candidates)"
             
