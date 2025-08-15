@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 #
 # Wordlebot - Enhanced Version with COCA Frequency Data, YAML Configuration, and Previous Word Exclusion
 #
