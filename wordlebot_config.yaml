@@ -92,8 +92,8 @@ wordle:
   # 86400 = 1 day, 604800 = 1 week
   cache_duration: 604800
 defaults:
-  # Default initial guess (if --crane flag used)
-  initial_guess: "crane"
+  # Default initial guess (if --slate flag used)
+  initial_guess: "slate"
   
   # Whether to show help message by default
   show_help: true

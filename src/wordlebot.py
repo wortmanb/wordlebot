@@ -95,7 +95,7 @@ def load_config() -> Dict[str, Any]:
             "debug_show_samples": 5,
         },
         "defaults": {
-            "initial_guess": "crane",
+            "initial_guess": "slate",
             "show_help": True,
             "file_encoding": "utf-8",
         },
@@ -501,7 +501,7 @@ Commands:
 
 Example:
 
-Enter guess: crane
+Enter guess: slate
 Enter response: c??N?
 Next guesses: cling, clink, clung, count, icing
 
@@ -821,11 +821,11 @@ def main() -> None:
         help="Don't print the handy dandy usage message",
     )
     parser.add_argument(
-        "--crane",
+        "--slate",
         action="store_true",
-        dest="crane",
-        default=False,
-        help="Use crane as our initial guess",
+        dest="slate",
+        default=True,
+        help="Use slate as our initial guess",
     )
     parser.add_argument(
         "--debug",
@@ -857,7 +857,7 @@ def main() -> None:
     current_candidates: List[str] = []
 
     while True:
-        if i == 1 and args.crane:
+        if i == 1 and args.slate:
             guess = wb.config["defaults"]["initial_guess"]
             print(f'Using default initial guess "{guess}"')
         else:
