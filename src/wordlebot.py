@@ -608,12 +608,20 @@ def main() -> None:
                     claude_strategy = ai_components['claude_strategy']
                     verbose = ai_components['verbose']
 
+                    print(f"Analyzing {len(current_candidates)} remaining candidates...")
+
                     # Calculate information gains for all candidates
                     info_gains = {}
-                    for candidate in current_candidates[:50]:  # Limit for performance
+                    candidates_to_evaluate = current_candidates[:50]  # Limit for performance
+                    print(f"Calculating information gain for top {len(candidates_to_evaluate)} candidates...", flush=True)
+
+                    for idx, candidate in enumerate(candidates_to_evaluate):
                         info_gains[candidate] = info_gain_calc.calculate_information_gain(
                             candidate, current_candidates
                         )
+                        # Show progress for larger candidate sets
+                        if len(candidates_to_evaluate) > 10 and (idx + 1) % 10 == 0:
+                            print(f"  Progress: {idx + 1}/{len(candidates_to_evaluate)} candidates...", flush=True)
 
                     # Sort by information gain
                     sorted_candidates = sorted(
@@ -626,6 +634,7 @@ def main() -> None:
                         best_info_gain = sorted_candidates[0][1]
 
                         # Get strategic recommendation from Claude
+                        print("Consulting Claude AI for strategic recommendation...", flush=True)
                         game_state = claude_strategy.format_game_state(wb)
                         strategy_mode = ai_components['strategy_mode']
 
