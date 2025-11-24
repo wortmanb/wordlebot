@@ -371,7 +371,7 @@ python -m pytest tests/ --cov=src --cov-report=html
 ```
 
 **Test Coverage:**
-- 66 total tests (as of November 2024)
+- 66 total tests (as of November 2025)
 - Unit tests for all AI components
 - Integration tests for end-to-end workflows
 - Backward compatibility verification
@@ -439,7 +439,7 @@ python -m pytest tests/ --cov=src --cov-report=html
 
 **Original Wordlebot:** Bret Wortman (C) 2022
 
-**AI Agent Enhancement (v2.0):** November 2024
+**AI Agent Enhancement (v2.0):** November 2025
 - Information theory implementation
 - Claude API integration
 - Multi-step lookahead engine
@@ -457,7 +457,7 @@ Beerware (V. 42)
 
 ## Project Status
 
-**Active Development:** AI Agent Enhancement complete (November 2024)
+**Active Development:** AI Agent Enhancement complete (November 2025)
 
 The project is functional and feature-complete for the core AI enhancement. Additional features from the roadmap may be added based on user feedback and performance analysis.
 
