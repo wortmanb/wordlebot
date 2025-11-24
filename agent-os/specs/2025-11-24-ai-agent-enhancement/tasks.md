@@ -54,46 +54,46 @@ Transform Wordlebot from passive frequency-based assistant to intelligent AI-pow
 **Size:** Medium-Large
 **Skills Required:** Python, Information Theory, Algorithm Design
 
-- [ ] 2.0 Complete information gain calculator implementation
-  - [ ] 2.1 Write 2-8 focused tests for InformationGainCalculator
+- [x] 2.0 Complete information gain calculator implementation
+  - [x] 2.1 Write 2-8 focused tests for InformationGainCalculator
     - Test entropy calculation with known word sets
     - Test partition grouping logic with sample scenarios
     - Test expected information gain computation
     - Test cache hit/miss behavior
     - Limit to critical calculation paths only
-  - [ ] 2.2 Create InformationGainCalculator class
+  - [x] 2.2 Create InformationGainCalculator class
     - Location: `src/information_gain.py` (new file)
     - Implement Shannon entropy using `math.log2`
     - Create data structure for partition representation
     - Initialize in-memory cache dictionary
-  - [ ] 2.3 Implement partition analysis
+  - [x] 2.3 Implement partition analysis
     - Method: `calculate_partitions(word: str, candidates: List[str]) -> Dict`
     - Group remaining candidates by potential Wordle response patterns
     - Return dictionary mapping response patterns to candidate lists
     - Use existing Wordlebot pattern logic (green/yellow/gray)
-  - [ ] 2.4 Implement entropy calculation
+  - [x] 2.4 Implement entropy calculation
     - Method: `calculate_entropy(candidates: List[str]) -> float`
     - Apply Shannon entropy formula: -Σ(p * log2(p))
     - Handle edge cases (empty list, single candidate)
     - Return entropy score
-  - [ ] 2.5 Implement expected information gain
+  - [x] 2.5 Implement expected information gain
     - Method: `calculate_information_gain(word: str, candidates: List[str]) -> float`
     - Calculate partitions for the word
     - Compute weighted average entropy across all partitions
     - Cache result with (word, candidates_hash) as key
     - Return information gain score
-  - [ ] 2.6 Implement first guess optimization
+  - [x] 2.6 Implement first guess optimization
     - Method: `get_best_first_guess(wordlist: List[str]) -> str`
     - Evaluate information gain for all words in pool (2000+ words)
     - Identify word with maximum information gain
     - Cache result for session
     - Return optimal opening word (e.g., "PLACE")
-  - [ ] 2.7 Optimize for performance
+  - [x] 2.7 Optimize for performance
     - Profile calculation time for 2000+ word sets
     - Add early termination for deterministic outcomes
     - Implement efficient cache key generation (hash of candidate set)
     - Target: <2 seconds for full first guess calculation
-  - [ ] 2.8 Ensure information gain calculator tests pass
+  - [x] 2.8 Ensure information gain calculator tests pass
     - Run ONLY the 2-8 tests written in 2.1
     - Verify calculations match expected values
     - Verify cache improves performance on repeated calls
