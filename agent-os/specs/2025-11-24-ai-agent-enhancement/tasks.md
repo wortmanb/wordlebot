@@ -114,19 +114,19 @@ Transform Wordlebot from passive frequency-based assistant to intelligent AI-pow
 **Size:** Large
 **Skills Required:** Python, API Integration, Prompt Engineering
 
-- [ ] 3.0 Complete Claude API integration and strategy core
-  - [ ] 3.1 Write 2-8 focused tests for ClaudeStrategy class
+- [x] 3.0 Complete Claude API integration and strategy core
+  - [x] 3.1 Write 2-8 focused tests for ClaudeStrategy class
     - Test game state serialization format
     - Test API response parsing with mock responses
     - Test error handling for malformed responses
     - Test retry logic with simulated failures (3 retries)
     - Limit to critical API interaction paths only
-  - [ ] 3.2 Create ClaudeStrategy class
+  - [x] 3.2 Create ClaudeStrategy class
     - Location: `src/claude_strategy.py` (new file)
     - Initialize Anthropic client with API key from .env
     - Load configuration from YAML (timeout, retries, model name)
     - Create instance variables for client, config, metrics tracker
-  - [ ] 3.3 Implement game state serialization
+  - [x] 3.3 Implement game state serialization
     - Method: `format_game_state(wordlebot: Wordlebot) -> Dict`
     - Extract pattern (green letters with positions)
     - Extract known letters from KnownLetters.data
@@ -134,7 +134,7 @@ Transform Wordlebot from passive frequency-based assistant to intelligent AI-pow
     - Extract min_letter_counts
     - Include previous guesses and responses
     - Return structured dictionary for prompt
-  - [ ] 3.4 Engineer Claude API prompt template
+  - [x] 3.4 Engineer Claude API prompt template
     - Method: `generate_prompt(game_state: Dict, candidates: List[str], info_gains: Dict, strategy_mode: str) -> str`
     - Include current game state (pattern, known/bad letters, constraints)
     - Include remaining candidate words with information gain scores
@@ -143,21 +143,21 @@ Transform Wordlebot from passive frequency-based assistant to intelligent AI-pow
     - Include previous guesses/responses for context
     - Request structured JSON response format
     - Optimize prompt for token efficiency while maintaining clarity
-  - [ ] 3.5 Implement API call with error handling
+  - [x] 3.5 Implement API call with error handling
     - Method: `call_api(prompt: str) -> Dict`
     - Use configured Claude model (from CLAUDE_MODEL env var)
     - Implement timeout from config (default: 30 seconds)
     - Wrap in try-except for network errors, auth failures
     - Track API call metrics (duration, tokens used)
     - Return raw API response
-  - [ ] 3.6 Implement retry logic with exponential backoff
+  - [x] 3.6 Implement retry logic with exponential backoff
     - Wrap API call in retry loop (max_retries from config, default: 3)
     - Detect rate limit errors (429 status)
     - Calculate backoff delay: base^attempt (e.g., 2^1=2s, 2^2=4s, 2^3=8s)
     - Log retry attempts when --debug flag active
     - Abort after max retries with user-friendly error message
     - Return None on failure for graceful degradation
-  - [ ] 3.7 Implement response parsing
+  - [x] 3.7 Implement response parsing
     - Method: `parse_response(api_response: Dict) -> Dict`
     - Extract recommended guess word
     - Extract strategic reasoning text
@@ -165,19 +165,19 @@ Transform Wordlebot from passive frequency-based assistant to intelligent AI-pow
     - Extract alternative word comparisons (for verbose mode)
     - Validate response structure, handle missing fields gracefully
     - Return structured dictionary with parsed data
-  - [ ] 3.8 Implement tie-breaking logic
+  - [x] 3.8 Implement tie-breaking logic
     - Method: `break_tie(tied_words: List[str], game_state: Dict, strategy_mode: str) -> str`
     - Generate specialized prompt for tie-breaking scenario
     - Include COCA frequencies as additional context
     - Call Claude API with tie-break request
     - Parse and return selected word
     - Fallback to COCA frequency if API fails
-  - [ ] 3.9 Implement fallback to frequency-based mode
+  - [x] 3.9 Implement fallback to frequency-based mode
     - Detect API unavailable condition (auth failure, repeated timeouts)
     - Log fallback event when --debug active
     - Display user-friendly message explaining fallback
     - Return None to signal Wordlebot to use existing COCA scoring
-  - [ ] 3.10 Ensure Claude strategy tests pass
+  - [x] 3.10 Ensure Claude strategy tests pass
     - Run ONLY the 2-8 tests written in 3.1
     - Verify game state serialization produces correct format
     - Verify response parsing handles various response structures
