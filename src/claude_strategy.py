@@ -297,6 +297,52 @@ Important: Your response must be valid JSON only, no additional text."""
             # Unexpected parsing error
             return None
 
+    def recommend_guess(
+        self,
+        game_state: Dict[str, Any],
+        candidates: List[str],
+        info_gains: Dict[str, float],
+        strategy_mode: str,
+        debug: bool = False
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get strategic guess recommendation from Claude API.
+
+        This is a convenience method that combines the full workflow:
+        generate_prompt() -> call_api() -> parse_response()
+
+        Args:
+            game_state: Serialized game state from format_game_state()
+            candidates: List of remaining candidate words
+            info_gains: Dictionary mapping words to information gain scores
+            strategy_mode: Strategy mode (aggressive, safe, balanced)
+            debug: If True, enable debug logging
+
+        Returns:
+            Dictionary with recommendation data:
+            - word: Recommended guess
+            - reasoning: Strategic reasoning
+            - info_gain: Information gain score
+            - alternatives: List of alternative words with notes
+            Returns None if API call fails
+        """
+        # Generate prompt
+        prompt = self.generate_prompt(
+            game_state=game_state,
+            candidates=candidates,
+            info_gains=info_gains,
+            strategy_mode=strategy_mode
+        )
+
+        # Call API
+        response = self.call_api(prompt, debug=debug)
+        if not response:
+            return None
+
+        # Parse response
+        recommendation = self.parse_response(response)
+        return recommendation
+
     def break_tie(
         self,
         tied_words: List[str],

@@ -808,7 +808,9 @@ def main() -> None:
     """
     Main function
     """
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Wordlebot - AI-powered Wordle assistant with strategic recommendations"
+    )
     parser.add_argument(
         "--config", "-c", type=str, default=None, help="Path to configuration file"
     )
@@ -821,11 +823,11 @@ def main() -> None:
         help="Don't print the handy dandy usage message",
     )
     parser.add_argument(
-        "--slate",
+        "--crane",
         action="store_true",
-        dest="slate",
-        default=True,
-        help="Use slate as our initial guess",
+        dest="crane",
+        default=False,
+        help="Use crane as our initial guess",
     )
     parser.add_argument(
         "--debug",
@@ -842,6 +844,36 @@ def main() -> None:
         default=None,
         help="Maximum number of candidates to display in detail (overrides config)",
     )
+    # AI mode flags
+    parser.add_argument(
+        "--ai",
+        "--agent",
+        action="store_true",
+        dest="ai",
+        default=False,
+        help="Enable AI mode for strategic recommendations using Claude API",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        dest="verbose",
+        default=False,
+        help="Enable verbose AI output with detailed explanations and reasoning",
+    )
+    parser.add_argument(
+        "--strategy",
+        type=str,
+        choices=["aggressive", "safe", "balanced"],
+        default=None,
+        help="Strategy mode for AI recommendations: aggressive (minimize average), safe (minimize worst-case), balanced (compromise) [default: from config]",
+    )
+    parser.add_argument(
+        "--lookahead-depth",
+        type=int,
+        default=None,
+        help="Lookahead depth for move evaluation (number of moves to simulate ahead) [default: from config]",
+    )
     args = parser.parse_args()
 
     wb = Wordlebot(args.debug, args.config)
@@ -850,6 +882,57 @@ def main() -> None:
     if args.max_display is not None:
         wb.config["display"]["max_display"] = args.max_display
 
+    # Initialize AI components if AI mode is enabled
+    ai_components = None
+    if args.ai:
+        try:
+            # Import AI modules only when AI mode is enabled
+            from information_gain import InformationGainCalculator
+            from claude_strategy import ClaudeStrategy
+            from lookahead_engine import LookaheadEngine
+            from strategy_mode import StrategyMode
+            import ai_display
+
+            # Determine strategy mode
+            if args.strategy:
+                strategy_mode = StrategyMode.from_string(args.strategy)
+            else:
+                default_mode = wb.config.get('ai', {}).get('strategy', {}).get('default_mode', 'balanced')
+                strategy_mode = StrategyMode.from_string(default_mode)
+
+            # Determine lookahead depth
+            if args.lookahead_depth is not None:
+                lookahead_depth = args.lookahead_depth
+            else:
+                lookahead_depth = wb.config.get('ai', {}).get('lookahead_depth', 2)
+
+            # Initialize AI components
+            info_gain_calc = InformationGainCalculator()
+            claude_strategy = ClaudeStrategy(wb.config)
+            lookahead_engine = LookaheadEngine(
+                lookahead_depth=lookahead_depth,
+                strategy_mode=str(strategy_mode),
+                info_gain_calculator=info_gain_calc
+            )
+
+            ai_components = {
+                'info_gain_calc': info_gain_calc,
+                'claude_strategy': claude_strategy,
+                'lookahead_engine': lookahead_engine,
+                'strategy_mode': strategy_mode,
+                'verbose': args.verbose,
+            }
+
+            print(f"AI mode enabled with strategy: {strategy_mode} (lookahead depth: {lookahead_depth})")
+
+        except Exception as e:
+            print(f"Error initializing AI components: {e}")
+            print("Falling back to frequency-based mode")
+            if args.debug:
+                import traceback
+                print(traceback.format_exc())
+            ai_components = None
+
     if args.usage and wb.config["defaults"]["show_help"]:
         print(wb.help_msg())
 
@@ -857,11 +940,112 @@ def main() -> None:
     current_candidates: List[str] = []
 
     while True:
-        if i == 1 and args.slate:
-            guess = wb.config["defaults"]["initial_guess"]
-            print(f'Using default initial guess "{guess}"')
+        # First guess logic
+        if i == 1:
+            if ai_components:
+                # AI mode: Calculate optimal first guess
+                try:
+                    print("Calculating optimal first guess using information theory...")
+                    info_gain_calc = ai_components['info_gain_calc']
+                    optimal_first = info_gain_calc.get_best_first_guess(wb.wordlist)
+                    print(f'AI recommends optimal opening: "{optimal_first}"')
+                    guess = input(f"{i} | Guess (press Enter to use AI recommendation): ")
+                    if not guess:
+                        guess = optimal_first
+                        print(f'{i} | Using AI recommendation: "{guess}"')
+                except Exception as e:
+                    print(f"Error calculating optimal first guess: {e}")
+                    if args.debug:
+                        import traceback
+                        print(traceback.format_exc())
+                    # Fall back to user input
+                    guess = input(f"{i} | Guess: ")
+            elif args.crane:
+                guess = "crane"
+                print(f'Using initial guess "{guess}"')
+            else:
+                guess = wb.config["defaults"]["initial_guess"]
+                print(f'Using default initial guess "{guess}"')
         else:
-            guess = input(f"{i} | Guess: ")
+            # Subsequent guesses
+            if ai_components and current_candidates:
+                # AI mode: Get strategic recommendation
+                try:
+                    info_gain_calc = ai_components['info_gain_calc']
+                    claude_strategy = ai_components['claude_strategy']
+                    verbose = ai_components['verbose']
+
+                    # Calculate information gains for all candidates
+                    info_gains = {}
+                    for candidate in current_candidates[:50]:  # Limit for performance
+                        info_gains[candidate] = info_gain_calc.calculate_information_gain(
+                            candidate, current_candidates
+                        )
+
+                    # Sort by information gain
+                    sorted_candidates = sorted(
+                        info_gains.items(), key=lambda x: x[1], reverse=True
+                    )
+
+                    # Get top candidate
+                    if sorted_candidates:
+                        best_word = sorted_candidates[0][0]
+                        best_info_gain = sorted_candidates[0][1]
+
+                        # Get strategic recommendation from Claude
+                        game_state = claude_strategy.format_game_state(wb)
+                        strategy_mode = ai_components['strategy_mode']
+
+                        try:
+                            recommendation = claude_strategy.recommend_guess(
+                                game_state=game_state,
+                                candidates=current_candidates[:20],  # Top 20 for Claude
+                                info_gains=info_gains,
+                                strategy_mode=str(strategy_mode)
+                            )
+
+                            # Display AI recommendation
+                            if verbose:
+                                ai_display.display_ai_recommendation_verbose(
+                                    word=recommendation.get('word', best_word),
+                                    info_gain=recommendation.get('info_gain', best_info_gain),
+                                    reasoning=recommendation.get('reasoning', ''),
+                                    alternatives=recommendation.get('alternatives', []),
+                                    metrics=recommendation.get('metrics', {}),
+                                    config=wb.config
+                                )
+                            else:
+                                ai_display.display_ai_recommendation_normal(
+                                    word=recommendation.get('word', best_word),
+                                    info_gain=recommendation.get('info_gain', best_info_gain)
+                                )
+
+                            ai_recommended = recommendation.get('word', best_word)
+                        except Exception as e:
+                            print(f"Claude API error: {e}")
+                            if args.debug:
+                                import traceback
+                                print(traceback.format_exc())
+                            # Fall back to information gain
+                            ai_recommended = best_word
+                            print(f"AI recommendation (fallback): {best_word} (info gain: {best_info_gain:.2f} bits)")
+
+                        guess = input(f"{i} | Guess (press Enter to use AI recommendation): ")
+                        if not guess:
+                            guess = ai_recommended
+                            print(f'{i} | Using AI recommendation: "{guess}"')
+                    else:
+                        guess = input(f"{i} | Guess: ")
+
+                except Exception as e:
+                    print(f"Error during AI recommendation: {e}")
+                    if args.debug:
+                        import traceback
+                        print(traceback.format_exc())
+                    guess = input(f"{i} | Guess: ")
+            else:
+                # Normal mode: User input
+                guess = input(f"{i} | Guess: ")
 
         # Check for special commands
         if guess.lower() in ["q", "quit"]:
@@ -892,7 +1076,10 @@ def main() -> None:
             solutions = wb.solve(response)
             current_candidates = solutions
             max_display = wb.config["display"]["max_display"]
-            print(f"{i} | {wb.display_candidates(solutions, max_display)}")
+
+            # In AI mode, don't show candidates if we'll show AI recommendation next
+            if not ai_components or len(solutions) <= 1:
+                print(f"{i} | {wb.display_candidates(solutions, max_display)}")
 
             if len(solutions) <= 1:
                 if len(solutions) == 1:
@@ -903,6 +1090,9 @@ def main() -> None:
         except Exception as e:
             print(f"Error processing response: {e}")
             print("Please check your response format and try again")
+            if args.debug:
+                import traceback
+                print(traceback.format_exc())
 
 
 if __name__ == "__main__":

@@ -324,41 +324,41 @@ Transform Wordlebot from passive frequency-based assistant to intelligent AI-pow
 **Size:** Medium
 **Skills Required:** Python, argparse, CLI Design
 
-- [ ] 6.0 Complete CLI extensions and strategy mode selection
-  - [ ] 6.1 Write 2-8 focused tests for CLI argument parsing
+- [x] 6.0 Complete CLI extensions and strategy mode selection
+  - [x] 6.1 Write 2-8 focused tests for CLI argument parsing
     - Test --ai flag parsing
     - Test --verbose flag parsing
     - Test --strategy flag with valid/invalid values
     - Test flag combinations
     - Limit to critical argument parsing paths only
-  - [ ] 6.2 Create StrategyMode enum
+  - [x] 6.2 Create StrategyMode enum
     - Location: `src/strategy_mode.py` (new file) or add to existing module
     - Define values: AGGRESSIVE, SAFE, BALANCED
     - Implement string conversion methods
     - Provide description/documentation for each mode
-  - [ ] 6.3 Extend argparse configuration
+  - [x] 6.3 Extend argparse configuration
     - Add `--ai` or `--agent` flag (boolean, default: False)
     - Add `-v` or `--verbose` flag (boolean, default: False)
     - Add `--strategy` flag with choices: {aggressive, safe, balanced}
     - Add `--lookahead-depth` flag (integer, default: from config)
     - Maintain all existing flags (--config, --quiet, --crane, --debug, --max-display)
     - Update help text to document new AI mode flags
-  - [ ] 6.4 Implement strategy mode configuration
+  - [x] 6.4 Implement strategy mode configuration
     - Load default strategy from YAML config
     - Override with --strategy flag if provided
     - Validate strategy value against allowed modes
     - Pass strategy parameter to Claude API and lookahead engine
-  - [ ] 6.5 Implement AI mode conditional branching
+  - [x] 6.5 Implement AI mode conditional branching
     - Modify main() function to check --ai flag
     - Instantiate AI components only when AI mode enabled
     - Maintain existing frequency-based mode when AI not enabled
     - Ensure backward compatibility (no AI behavior changes without --ai)
-  - [ ] 6.6 Implement first guess logic for AI mode
+  - [x] 6.6 Implement first guess logic for AI mode
     - If --ai flag set: Calculate optimal first guess using InformationGainCalculator
     - Override --crane or default if AI mode active
     - Allow user manual input to override AI suggestion
     - Display calculated optimal opening word
-  - [ ] 6.7 Ensure CLI tests pass
+  - [x] 6.7 Ensure CLI tests pass
     - Run ONLY the 2-8 tests written in 6.1
     - Verify all new flags parse correctly
     - Verify strategy mode selection works
