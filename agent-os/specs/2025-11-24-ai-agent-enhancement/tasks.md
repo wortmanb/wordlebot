@@ -200,30 +200,30 @@ Transform Wordlebot from passive frequency-based assistant to intelligent AI-pow
 **Size:** Large-XLarge
 **Skills Required:** Python, Algorithm Design, Game Tree Search, Optimization
 
-- [ ] 4.0 Complete multi-step lookahead engine
-  - [ ] 4.1 Write 2-8 focused tests for LookaheadEngine
+- [x] 4.0 Complete multi-step lookahead engine
+  - [x] 4.1 Write 2-8 focused tests for LookaheadEngine
     - Test move evaluation with simple scenarios (2-3 candidates)
     - Test response simulation accuracy
     - Test early termination when deterministic
     - Test tree pruning behavior
     - Limit to critical lookahead paths only
-  - [ ] 4.2 Create LookaheadEngine class
+  - [x] 4.2 Create LookaheadEngine class
     - Location: `src/lookahead_engine.py` (new file)
     - Initialize with configuration (lookahead_depth, strategy_mode)
     - Create reference to InformationGainCalculator instance
     - Create data structures for evaluation tree storage
-  - [ ] 4.3 Implement response simulation
+  - [x] 4.3 Implement response simulation
     - Method: `simulate_response(guess: str, target: str) -> str`
     - Generate Wordle response pattern (green/yellow/gray)
     - Use existing Wordlebot pattern matching logic
     - Return response string in internal format
     - Optimize for repeated calls (consider memoization)
-  - [ ] 4.4 Implement candidate filtering after simulated response
+  - [x] 4.4 Implement candidate filtering after simulated response
     - Method: `filter_candidates(guess: str, response: str, candidates: List[str]) -> List[str]`
     - Apply response constraints to candidate list
     - Reuse existing Wordlebot filtering logic
     - Return filtered candidate list
-  - [ ] 4.5 Implement single move evaluation
+  - [x] 4.5 Implement single move evaluation
     - Method: `evaluate_move(word: str, candidates: List[str], depth: int, strategy: str) -> float`
     - Base case: If depth=0 or candidates deterministic, return heuristic score
     - For each candidate, simulate response and filter remaining candidates
@@ -231,26 +231,26 @@ Transform Wordlebot from passive frequency-based assistant to intelligent AI-pow
     - Calculate expected guess count across all response scenarios
     - Weight outcomes based on strategy mode (aggressive vs safe)
     - Return expected score for this move
-  - [ ] 4.6 Implement strategy-based outcome weighting
+  - [x] 4.6 Implement strategy-based outcome weighting
     - Aggressive mode: Minimize average guess count (equal weights)
     - Safe mode: Minimize worst-case scenarios (heavy weight on max)
     - Balanced mode: Compromise between average and worst-case
     - Apply weighting in evaluate_move calculation
-  - [ ] 4.7 Implement best move selection
+  - [x] 4.7 Implement best move selection
     - Method: `get_best_move(candidates: List[str], depth: int, strategy: str) -> Tuple[str, float, Dict]`
     - Evaluate all remaining candidates using evaluate_move
     - Track evaluation tree for potential verbose display
     - Return tuple: (best_word, expected_score, evaluation_tree)
-  - [ ] 4.8 Implement early termination optimization
+  - [x] 4.8 Implement early termination optimization
     - Detect when outcomes become deterministic (1-2 candidates remaining)
     - Skip further lookahead when outcome is certain
     - Return immediate score for deterministic states
-  - [ ] 4.9 Implement tree pruning for performance
+  - [x] 4.9 Implement tree pruning for performance
     - Set pruning threshold (e.g., 100 candidates)
     - When candidates exceed threshold, limit lookahead depth or sample
     - Balance thoroughness vs performance
     - Document pruning strategy in code comments
-  - [ ] 4.10 Ensure lookahead engine tests pass
+  - [x] 4.10 Ensure lookahead engine tests pass
     - Run ONLY the 2-8 tests written in 4.1
     - Verify move evaluation produces reasonable scores
     - Verify early termination triggers correctly
