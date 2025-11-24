@@ -545,9 +545,8 @@ def main() -> None:
             if ai_components:
                 # AI mode: Calculate optimal first guess
                 try:
-                    print("Calculating optimal first guess using information theory...")
                     info_gain_calc = ai_components['info_gain_calc']
-                    optimal_first = info_gain_calc.get_best_first_guess(wb.wordlist)
+                    optimal_first = info_gain_calc.get_best_first_guess(wb.wordlist, show_progress=True)
                     first_guess_info_gain = info_gain_calc.calculate_information_gain(optimal_first, wb.wordlist)
                     print(f'AI recommends optimal opening: "{optimal_first}" (info gain: {first_guess_info_gain:.2f} bits)')
                     guess = input(f"{i} | Guess (press Enter to use AI recommendation): ")

@@ -181,7 +181,7 @@ class InformationGainCalculator:
 
         return info_gain
 
-    def get_best_first_guess(self, wordlist: List[str]) -> str:
+    def get_best_first_guess(self, wordlist: List[str], show_progress: bool = False) -> str:
         """
         Calculate the optimal first guess by evaluating information gain for all words.
 
@@ -194,6 +194,7 @@ class InformationGainCalculator:
 
         Args:
             wordlist: Complete list of valid Wordle words
+            show_progress: If True, display progress indicator during calculation
 
         Returns:
             The word with maximum information gain (e.g., "place" for standard Wordle)
@@ -209,6 +210,10 @@ class InformationGainCalculator:
         if self._first_guess_cache and self._first_guess_cache[1] == wordlist_size:
             return self._first_guess_cache[0]
 
+        if show_progress:
+            print(f"Calculating optimal first guess from {wordlist_size} words...")
+            print("This may take a few seconds...", flush=True)
+
         best_word = wordlist[0]
         best_info_gain = 0.0
 
@@ -222,9 +227,13 @@ class InformationGainCalculator:
                 best_info_gain = info_gain
                 best_word = word
 
-            # Optional: Print progress for long calculations (every 100 words)
-            # if (i + 1) % 100 == 0:
-            #     print(f"Evaluated {i + 1}/{len(wordlist)} words...")
+            # Print progress indicator for long calculations
+            if show_progress and (i + 1) % 100 == 0:
+                progress_pct = ((i + 1) / len(wordlist)) * 100
+                print(f"  Progress: {i + 1}/{len(wordlist)} words ({progress_pct:.0f}%)...", flush=True)
+
+        if show_progress:
+            print(f"✓ Optimal first guess: {best_word.upper()} (info gain: {best_info_gain:.2f} bits)\n")
 
         # Cache the result
         self._first_guess_cache = (best_word, wordlist_size)
