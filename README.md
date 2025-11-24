@@ -6,7 +6,7 @@ Wordlebot, the handy Wordle assistant with AI-powered strategic solving
 
 Wordlebot is a Python-based Wordle assistant that helps narrow down candidate words based on Wordle responses. It uses the official Wordle word list and ranks suggestions by frequency data from the Corpus of Contemporary American English (COCA).
 
-**New in 2024:** Wordlebot now features an AI Agent mode that transforms it from a passive frequency-based assistant into an intelligent strategic solver using information theory, Claude API-powered reasoning, and multi-step lookahead to minimize guess counts.
+**New in 2025:** Wordlebot now features an AI Agent mode that transforms it from a passive frequency-based assistant into an intelligent strategic solver using information theory, Claude API-powered reasoning, and multi-step lookahead to minimize guess counts.
 
 ## Features
 
