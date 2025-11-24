@@ -7,6 +7,7 @@ import argparse
 import csv
 import re
 import shutil
+import sys
 import time
 import urllib.request
 from pathlib import Path
@@ -14,7 +15,12 @@ from typing import Any, Dict, List, Optional, Set
 
 import yaml
 
-from src import env_manager
+# Handle imports for both script and installed package
+try:
+    from src import env_manager
+except ModuleNotFoundError:
+    # When running as installed package, module is at top level
+    import env_manager
 
 HOME: str = str(Path.home())
 
