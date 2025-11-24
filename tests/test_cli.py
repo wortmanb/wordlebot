@@ -90,6 +90,13 @@ def parse_args(args: List[str]) -> argparse.Namespace:
         default=None,
         help="Lookahead depth for move evaluation (default: from config)",
     )
+    parser.add_argument(
+        "--recalculate-first-guess",
+        action="store_true",
+        dest="recalculate_first_guess",
+        default=False,
+        help="Force recalculation of optimal first guess",
+    )
 
     return parser.parse_args(args)
 
@@ -195,3 +202,13 @@ class TestCLIArgumentParsing:
         assert args.verbose is False, "Verbose should remain disabled"
         assert args.debug is False, "Debug should remain disabled"
         assert args.strategy is None, "Strategy should use config default"
+
+    def test_recalculate_first_guess_flag(self):
+        """Test --recalculate-first-guess flag"""
+        args = parse_args(["--ai", "--recalculate-first-guess"])
+        assert args.recalculate_first_guess is True, "Recalculate flag should be enabled"
+
+    def test_recalculate_first_guess_default_false(self):
+        """Test --recalculate-first-guess defaults to False"""
+        args = parse_args(["--ai"])
+        assert args.recalculate_first_guess is False, "Recalculate flag should default to False"

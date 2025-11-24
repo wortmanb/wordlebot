@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional, Set
 
 import yaml
 
+from src import env_manager
+
 HOME: str = str(Path.home())
 
 
@@ -460,6 +462,13 @@ def main() -> None:
         default=None,
         help="Lookahead depth for move evaluation (number of moves to simulate ahead) [default: from config]",
     )
+    parser.add_argument(
+        "--recalculate-first-guess",
+        action="store_true",
+        dest="recalculate_first_guess",
+        default=False,
+        help="Force recalculation of optimal first guess (ignores cached value in .env)",
+    )
     args = parser.parse_args()
 
     wb = Wordlebot(args.debug, args.config)
@@ -543,10 +552,30 @@ def main() -> None:
         # First guess logic
         if i == 1:
             if ai_components:
-                # AI mode: Calculate optimal first guess
+                # AI mode: Get optimal first guess (cached or calculate)
                 try:
                     info_gain_calc = ai_components['info_gain_calc']
-                    optimal_first = info_gain_calc.get_best_first_guess(wb.wordlist, show_progress=True)
+                    optimal_first = None
+
+                    # Try to use cached value unless recalculation is forced
+                    if not args.recalculate_first_guess:
+                        cached_first = env_manager.read_optimal_first_guess()
+                        if cached_first and cached_first in wb.wordlist:
+                            optimal_first = cached_first
+                            if args.debug:
+                                print(f"Using cached optimal first guess: {optimal_first}")
+
+                    # Calculate if not cached or recalculation forced
+                    if optimal_first is None:
+                        optimal_first = info_gain_calc.get_best_first_guess(wb.wordlist, show_progress=True)
+                        # Cache the result for future runs
+                        if env_manager.write_optimal_first_guess(optimal_first):
+                            if args.debug:
+                                print(f"Cached optimal first guess to .env: {optimal_first}")
+                        else:
+                            if args.debug:
+                                print("Warning: Failed to cache optimal first guess to .env")
+
                     first_guess_info_gain = info_gain_calc.calculate_information_gain(optimal_first, wb.wordlist)
                     print(f'AI recommends optimal opening: "{optimal_first}" (info gain: {first_guess_info_gain:.2f} bits)')
                     guess = input(f"{i} | Guess (press Enter to use AI recommendation): ")
