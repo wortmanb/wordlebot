@@ -24,14 +24,16 @@ class ClaudeStrategy:
     - API calls with retry logic and exponential backoff
     - Response parsing and validation
     - Tie-breaking between equally-scored candidates
+    - Performance tracking via PerformanceLogger
     """
 
-    def __init__(self, config: Dict[str, Any]) -> None:
+    def __init__(self, config: Dict[str, Any], performance_logger: Optional[Any] = None) -> None:
         """
         Initialize Claude strategy with API client and configuration.
 
         Args:
             config: Configuration dictionary containing AI settings
+            performance_logger: Optional PerformanceLogger instance for tracking metrics
         """
         # Load environment variables from .env file
         load_dotenv()
@@ -55,6 +57,9 @@ class ClaudeStrategy:
         self.max_retries = self.api_config.get('max_retries', 3)
         self.timeout = self.api_config.get('timeout_seconds', 30)
         self.backoff_base = self.api_config.get('exponential_backoff_base', 2)
+
+        # Performance logger integration
+        self.performance_logger = performance_logger
 
         # Metrics tracking
         self.metrics = {
@@ -196,9 +201,21 @@ Important: Your response must be valid JSON only, no additional text."""
                 duration = time.time() - start_time
                 self.metrics['api_calls'] += 1
                 self.metrics['total_duration'] += duration
+
+                # Extract token counts
+                total_tokens = 0
                 if hasattr(response, 'usage'):
-                    self.metrics['total_tokens'] += (
+                    total_tokens = (
                         response.usage.input_tokens + response.usage.output_tokens
+                    )
+                    self.metrics['total_tokens'] += total_tokens
+
+                # Track in performance logger if available
+                if self.performance_logger:
+                    self.performance_logger.track_api_call(
+                        duration=duration,
+                        tokens=total_tokens,
+                        model=self.model
                     )
 
                 return response

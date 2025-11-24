@@ -381,57 +381,57 @@ Transform Wordlebot from passive frequency-based assistant to intelligent AI-pow
 **Size:** Medium
 **Skills Required:** Python, Logging, Data Structure Design
 
-- [ ] 7.0 Complete performance logging and metrics tracking
-  - [ ] 7.1 Write 2-8 focused tests for PerformanceLogger
+- [x] 7.0 Complete performance logging and metrics tracking
+  - [x] 7.1 Write 2-8 focused tests for PerformanceLogger
     - Test metrics tracking and accumulation
     - Test log file writing (CSV/JSON format)
     - Test cost calculation logic
     - Limit to critical logging paths only
-  - [ ] 7.2 Create PerformanceLogger class
+  - [x] 7.2 Create PerformanceLogger class
     - Location: `src/performance_logger.py` (new file)
     - Initialize with log file path from config
     - Create data structures for metrics storage
     - Track: API calls, tokens, costs, guess sequence, timestamps
-  - [ ] 7.3 Implement API call tracking
+  - [x] 7.3 Implement API call tracking
     - Method: `track_api_call(duration: float, tokens: int, model: str)`
     - Record call duration, token count, model used
     - Accumulate metrics for session summary
     - Calculate estimated cost based on token usage and model pricing
-  - [ ] 7.4 Implement guess tracking
+  - [x] 7.4 Implement guess tracking
     - Method: `track_guess(word: str, info_gain: float, response: str)`
     - Record guess word, information gain score, Wordle response
     - Build guess sequence list
     - Track timestamp for each guess
-  - [ ] 7.5 Implement cost calculation
+  - [x] 7.5 Implement cost calculation
     - Method: `calculate_cost(total_tokens: int, model: str) -> float`
     - Use Claude API pricing: input/output token costs
     - Model-specific pricing (Sonnet rates)
     - Return estimated cost in USD
-  - [ ] 7.6 Implement session summary generation
+  - [x] 7.6 Implement session summary generation
     - Method: `generate_summary() -> Dict`
     - Compile all tracked metrics into structured dictionary
     - Include: total guesses, API call count, total cost, avg response time
     - Include: total solving time, info gain per guess, guess sequence
     - Include: timestamp, solution word (if known), strategy mode used
-  - [ ] 7.7 Implement terminal display of metrics
+  - [x] 7.7 Implement terminal display of metrics
     - Method: `display_summary()`
     - Format summary for terminal output
     - Display after successful solution
     - Include comparison to frequency-based approach if available
     - Respect terminal width from config
-  - [ ] 7.8 Implement file logging
+  - [x] 7.8 Implement file logging
     - Method: `write_summary(log_file: Path, format: str = "csv")`
     - Support CSV or JSON format (configurable)
     - Append to log file (don't overwrite)
     - Include all metrics from generate_summary()
     - Create log directory if not exists
     - Handle file write errors gracefully
-  - [ ] 7.9 Integrate performance tracking into Wordlebot flow
+  - [x] 7.9 Integrate performance tracking into Wordlebot flow
     - Pass PerformanceLogger instance to ClaudeStrategy
     - Track API calls in call_api method
     - Track guesses in main game loop
     - Call display_summary() and write_summary() at game end
-  - [ ] 7.10 Ensure performance logger tests pass
+  - [x] 7.10 Ensure performance logger tests pass
     - Run ONLY the 2-8 tests written in 7.1
     - Verify metrics accumulate correctly
     - Verify log file writes successfully
