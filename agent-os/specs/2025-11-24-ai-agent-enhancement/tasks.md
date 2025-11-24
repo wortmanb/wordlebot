@@ -13,19 +13,19 @@ Transform Wordlebot from passive frequency-based assistant to intelligent AI-pow
 **Size:** Small-Medium
 **Skills Required:** DevOps, Python environment configuration
 
-- [ ] 1.0 Complete foundation and environment setup
-  - [ ] 1.1 Update Python dependencies
+- [x] 1.0 Complete foundation and environment setup
+  - [x] 1.1 Update Python dependencies
     - Add `anthropic` to requirements.txt (Anthropic Python SDK)
     - Add `python-dotenv` to requirements.txt
     - Document minimum version requirements
     - Run pip install to verify no conflicts with existing dependencies
-  - [ ] 1.2 Configure vault secrets and .env file
+  - [x] 1.2 Configure vault secrets and .env file
     - Retrieve `ANTHROPIC_API_KEY` from vault.lab.thewortmans.org
     - Create `.env.example` template with placeholder values
     - Create `.env` file with actual credentials (git-ignored)
     - Add `CLAUDE_MODEL` environment variable (default: claude-3-5-sonnet-20241022)
     - Document vault retrieval process in project docs
-  - [ ] 1.3 Extend YAML configuration structure
+  - [x] 1.3 Extend YAML configuration structure
     - Add `ai` section to wordlebot_config.yaml
     - Configure `lookahead_depth` (default: 2)
     - Configure `strategy.default_mode` (default: "balanced")
@@ -36,7 +36,7 @@ Transform Wordlebot from passive frequency-based assistant to intelligent AI-pow
     - Configure `cache.enabled` (default: true)
     - Configure `performance_log_file` (default: "~/.cache/wordlebot/performance.log")
     - Validate YAML structure loads correctly
-  - [ ] 1.4 Create performance log directory
+  - [x] 1.4 Create performance log directory
     - Create `~/.cache/wordlebot/` directory if not exists
     - Set appropriate permissions
     - Verify write access

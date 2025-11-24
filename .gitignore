@@ -1,2 +1,22 @@
 *.sublime-workspace
 src/__pycache__/wordlebot.cpython-312.pyc
+
+# Environment variables and secrets
+.env
+.env.local
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/

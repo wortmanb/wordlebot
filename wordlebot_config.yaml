@@ -5,13 +5,13 @@
 files:
   # Path to the 5-letter word list (relative to HOME or absolute path)
   wordlist: "git/wordlebot/data/wordlist_fives.txt"
-  
+
   # Path to the COCA frequency data (relative to HOME or absolute path)
   coca_frequency: "git/wordlebot/data/coca_frequency.csv"
-  
+
   # URL or path to previously used Wordle words (optional)
   previous_wordle_words: "https://eagerterrier.github.io/previous-wordle-words/alphabetical.txt"
-  
+
   # Alternative: you can use absolute paths like:
   # wordlist: "/home/username/wordlebot/data/wordlist_fives.txt"
   # coca_frequency: "/home/username/wordlebot/data/coca_frequency.csv"
@@ -23,7 +23,7 @@ data_format:
   coca_freq_column: "freq"       # Column name containing frequencies
   coca_word_column_index: 1      # Fallback: column index for words (0-based)
   coca_freq_column_index: 3      # Fallback: column index for frequencies (0-based)
-  
+
   # CSV delimiter (auto-detected if not specified)
   csv_delimiter: ","             # Can be ",", "\t", ";", "|", or "auto"
 
@@ -31,12 +31,12 @@ data_format:
 display:
   # Maximum number of candidates to show initially
   max_display: 20
-  
+
   # Terminal width settings
   min_terminal_width: 40         # Minimum assumed terminal width
   default_terminal_width: 80     # Default if detection fails
   word_display_width: 8          # Space allocated per word in display
-  
+
   # Show frequency counts for small candidate lists
   show_frequencies_threshold: 5   # Show frequencies when <= this many candidates
 
@@ -44,7 +44,7 @@ display:
 scoring:
   # Bonus multiplier for words with all unique letters
   unique_letters_bonus: 1.1      # 10% bonus for 5 unique letters
-  
+
   # Fallback letter frequency scores (when COCA data unavailable)
   letter_frequencies:
     e: 12
@@ -78,7 +78,7 @@ scoring:
 validation:
   # Regex pattern for valid guess/response input
   input_pattern: "^[a-zA-Z?]{5}$"
-  
+
   # Debug settings
   debug_sample_size: 1000        # Number of rows to check when analyzing CSV
   debug_show_samples: 5          # Number of sample words to show in debug mode
@@ -87,16 +87,53 @@ validation:
 wordle:
   # Starting from which guess number to exclude previously used words
   exclude_previous_from_guess: 3
-  
+
   # Cache duration for downloaded previous words list (in seconds)
   # 86400 = 1 day, 604800 = 1 week
   cache_duration: 604800
+
+# Default settings
 defaults:
   # Default initial guess (if --slate flag used)
   initial_guess: "slate"
-  
+
   # Whether to show help message by default
   show_help: true
-  
+
   # Encoding for file reading
   file_encoding: "utf-8"
+
+# AI Agent Enhancement settings
+ai:
+  # Multi-step lookahead depth (number of moves to simulate ahead)
+  lookahead_depth: 2
+
+  # Strategy configuration
+  strategy:
+    # Default strategy mode: aggressive, safe, or balanced
+    default_mode: "balanced"
+
+    # Available strategy modes
+    modes:
+      - "aggressive"  # Minimize average guess count
+      - "safe"        # Minimize worst-case scenarios
+      - "balanced"    # Compromise between average and worst-case
+
+  # API configuration
+  api:
+    # Maximum number of retry attempts for API calls
+    max_retries: 3
+
+    # Timeout for API calls in seconds
+    timeout_seconds: 30
+
+    # Base for exponential backoff calculation (delay = base^attempt)
+    exponential_backoff_base: 2
+
+  # Cache configuration
+  cache:
+    # Enable in-memory caching for entropy calculations
+    enabled: true
+
+  # Performance logging
+  performance_log_file: "~/.cache/wordlebot/performance.log"
