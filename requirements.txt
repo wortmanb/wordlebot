@@ -9,3 +9,9 @@ anthropic>=0.39.0
 
 # Environment variable management for secrets
 python-dotenv>=1.0.0
+
+# Elasticsearch client for dictionary storage
+elasticsearch>=8.0.0
+
+# HashiCorp Vault client for secrets management
+hvac>=2.0.0

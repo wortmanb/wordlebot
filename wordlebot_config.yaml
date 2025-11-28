@@ -1,7 +1,7 @@
 # Wordlebot Configuration File
 # This file contains all configurable settings for the Wordlebot
 
-# File paths
+# File paths (used as fallback when Elasticsearch is disabled)
 files:
   # Path to the 5-letter word list (relative to HOME or absolute path)
   wordlist: "git/wordlebot/data/wordlist_fives.txt"
@@ -15,6 +15,28 @@ files:
   # Alternative: you can use absolute paths like:
   # wordlist: "/home/username/wordlebot/data/wordlist_fives.txt"
   # coca_frequency: "/home/username/wordlebot/data/coca_frequency.csv"
+
+# Elasticsearch configuration
+elasticsearch:
+  # Enable/disable Elasticsearch for dictionary storage
+  enabled: true
+
+  # Elasticsearch host URL
+  host: "https://elasticsearch.bwortman.us"
+
+  # Vault configuration for API key retrieval
+  vault:
+    address: "https://vault.bwortman.us"
+    secret_path: "secret/homelab/elasticsearch/api-keys"
+    key_field: "lab_es_api_key"
+
+  # Index name (unified v2 index with optimized schema)
+  index: "wordlebot-words-v2"
+
+  # Legacy index names (for fallback/migration)
+  indices:
+    wordlist: "wordlebot-wordlist"
+    coca_frequency: "wordlebot-coca-frequency"
 
 # Data format settings
 data_format:

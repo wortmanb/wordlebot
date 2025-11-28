@@ -5,15 +5,29 @@
 #
 import argparse
 import csv
+import json
 import re
 import shutil
+import subprocess
 import sys
 import time
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import yaml
+
+# Optional Elasticsearch support
+try:
+    from elasticsearch import Elasticsearch
+    HAS_ELASTICSEARCH = True
+except ImportError:
+    HAS_ELASTICSEARCH = False
+
+# Cache configuration
+CACHE_DIR = Path.home() / ".cache" / "wordlebot"
+WORDS_CACHE_FILE = CACHE_DIR / "words_v2.json"
+CACHE_MAX_AGE_SECONDS = 86400 * 7  # 7 days
 
 # Handle imports for both script and installed package
 try:
@@ -50,6 +64,19 @@ def load_config() -> Dict[str, Any]:
             "wordlist": "git/wordlebot/data/wordlist_fives.txt",
             "coca_frequency": "git/wordlebot/data/coca_frequency.csv",
             "previous_wordle_words": "https://eagerterrier.github.io/previous-wordle-words/alphabetical.txt",
+        },
+        "elasticsearch": {
+            "enabled": False,
+            "host": "",
+            "vault": {
+                "address": "",
+                "secret_path": "",
+                "key_field": "",
+            },
+            "indices": {
+                "wordlist": "wordlebot-wordlist",
+                "coca_frequency": "wordlebot-coca-frequency",
+            },
         },
         "data_format": {
             "coca_word_column": "lemma",
@@ -150,6 +177,64 @@ def resolve_path(path: str, home: str = HOME) -> str:
     return path
 
 
+def get_es_api_key_from_vault(vault_config: Dict[str, str]) -> Optional[str]:
+    """Retrieve Elasticsearch API key from Vault using CLI."""
+    try:
+        secret_path = vault_config.get("secret_path", "")
+        key_field = vault_config.get("key_field", "")
+
+        result = subprocess.run(
+            ["vault", "kv", "get", "-field", key_field, secret_path],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        return None
+    except FileNotFoundError:
+        return None
+
+
+def is_cache_valid(cache_file: Path, max_age: int = CACHE_MAX_AGE_SECONDS) -> bool:
+    """Check if cache file exists and is not stale."""
+    if not cache_file.exists():
+        return False
+    age = time.time() - cache_file.stat().st_mtime
+    return age < max_age
+
+
+def load_words_from_cache(cache_file: Path) -> Optional[Tuple[List[str], Dict[str, int]]]:
+    """Load wordlist and frequencies from local cache."""
+    try:
+        with open(cache_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        wordlist = data.get("words", [])
+        frequencies = data.get("frequencies", {})
+        return wordlist, frequencies
+    except Exception:
+        return None
+
+
+def save_words_to_cache(
+    cache_file: Path, wordlist: List[str], frequencies: Dict[str, int]
+) -> bool:
+    """Save wordlist and frequencies to local cache."""
+    try:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "words": wordlist,
+            "frequencies": frequencies,
+            "cached_at": time.time(),
+            "version": "v2"
+        }
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        return True
+    except Exception:
+        return False
+
+
 class Wordlebot:
     """Main Wordlebot class for Wordle assistance"""
 
@@ -173,25 +258,156 @@ class Wordlebot:
         self.guess_number = 0
         self.guesses: List[str] = []
 
-        # Load word list
-        wordlist_path = resolve_path(self.config["files"]["wordlist"])
-        with open(wordlist_path, "r", encoding=self.config["defaults"]["file_encoding"]) as f:
-            self.wordlist = [word.strip().lower() for word in f if len(word.strip()) == 5]
+        # Initialize Elasticsearch client if enabled
+        self.es_client: Optional[Elasticsearch] = None
+        self._init_elasticsearch()
 
-        # Load COCA frequency data
+        # Initialize data containers
+        self.wordlist: List[str] = []
         self.word_frequencies: Dict[str, int] = {}
+
+        # Load word list and frequencies (from cache, ES, or files)
+        self._load_wordlist()
         self._load_coca_frequency()
 
         # Load previous Wordle words
         self.previous_words: Set[str] = set()
         self._load_previous_words()
 
+    def _init_elasticsearch(self) -> None:
+        """Initialize Elasticsearch client if enabled and available."""
+        es_config = self.config.get("elasticsearch", {})
+
+        if not es_config.get("enabled", False):
+            if self.debug:
+                print("Elasticsearch disabled in config")
+            return
+
+        if not HAS_ELASTICSEARCH:
+            if self.debug:
+                print("Elasticsearch package not installed, using file fallback")
+            return
+
+        # Get API key from Vault
+        vault_config = es_config.get("vault", {})
+        api_key = get_es_api_key_from_vault(vault_config)
+
+        if not api_key:
+            if self.debug:
+                print("Could not retrieve ES API key from Vault, using file fallback")
+            return
+
+        # Create ES client
+        try:
+            es_host = es_config.get("host", "")
+            self.es_client = Elasticsearch(
+                es_host,
+                api_key=api_key,
+                verify_certs=True,
+                request_timeout=30
+            )
+
+            if not self.es_client.ping():
+                if self.debug:
+                    print("Could not connect to Elasticsearch, using file fallback")
+                self.es_client = None
+                return
+
+            # Store the index name
+            self.es_index = es_config.get("index", "wordlebot-words-v2")
+
+            if self.debug:
+                print(f"Connected to Elasticsearch at {es_host}")
+
+        except Exception as e:
+            if self.debug:
+                print(f"Error connecting to Elasticsearch: {e}")
+            self.es_client = None
+
+    def _load_wordlist(self) -> None:
+        """Load wordlist using hybrid approach: local cache with ES as source of truth."""
+        # Strategy: Use local cache for fast in-memory filtering
+        # Refresh cache from ES when stale or missing
+
+        # Check local cache first
+        if is_cache_valid(WORDS_CACHE_FILE):
+            cached = load_words_from_cache(WORDS_CACHE_FILE)
+            if cached:
+                self.wordlist, self.word_frequencies = cached
+                if self.debug:
+                    print(f"Loaded {len(self.wordlist)} words from cache (in-memory filtering)")
+                return
+
+        # Cache miss or stale - try to refresh from ES
+        if self.es_client:
+            try:
+                if self.debug:
+                    print("Cache miss/stale - fetching from Elasticsearch...")
+
+                words = []
+                frequencies = {}
+
+                # Fetch all words with frequencies from ES
+                resp = self.es_client.search(
+                    index=self.es_index,
+                    body={"query": {"match_all": {}}, "size": 10000, "_source": ["word", "freq"]},
+                    scroll="2m"
+                )
+
+                scroll_id = resp["_scroll_id"]
+                hits = resp["hits"]["hits"]
+
+                while hits:
+                    for hit in hits:
+                        word = hit["_source"]["word"]
+                        freq = hit["_source"].get("freq", 0)
+                        words.append(word)
+                        if freq > 0:
+                            frequencies[word] = freq
+
+                    resp = self.es_client.scroll(scroll_id=scroll_id, scroll="2m")
+                    scroll_id = resp["_scroll_id"]
+                    hits = resp["hits"]["hits"]
+
+                self.es_client.clear_scroll(scroll_id=scroll_id)
+
+                self.wordlist = words
+                self.word_frequencies = frequencies
+
+                # Save to cache for next time
+                if save_words_to_cache(WORDS_CACHE_FILE, words, frequencies):
+                    if self.debug:
+                        print(f"Cached {len(words)} words to {WORDS_CACHE_FILE}")
+
+                if self.debug:
+                    print(f"Loaded {len(self.wordlist)} words from ES (cached for future)")
+                return
+
+            except Exception as e:
+                if self.debug:
+                    print(f"Error fetching from ES: {e}, falling back to file")
+
+        # Final fallback: load from local files
+        wordlist_path = resolve_path(self.config["files"]["wordlist"])
+        with open(wordlist_path, "r", encoding=self.config["defaults"]["file_encoding"]) as f:
+            self.wordlist = [word.strip().lower() for word in f if len(word.strip()) == 5]
+
+        if self.debug:
+            print(f"Loaded {len(self.wordlist)} words from file")
+
     def _load_coca_frequency(self) -> None:
-        """Load COCA frequency data"""
+        """Load COCA frequency data (frequencies are loaded with wordlist cache)."""
+        # Frequencies are now loaded together with wordlist from cache/ES
+        # Only load from file if word_frequencies is still empty (file fallback case)
+        if self.word_frequencies:
+            if self.debug:
+                print(f"Using {len(self.word_frequencies)} COCA frequencies from cache")
+            return
+
+        # Fallback to file (needed for client-side scoring when no cache/ES)
         coca_path = resolve_path(self.config["files"]["coca_frequency"])
         try:
             with open(coca_path, "r", encoding=self.config["defaults"]["file_encoding"]) as f:
-                # Try to read with header
                 reader = csv.DictReader(f, delimiter=self.config["data_format"]["csv_delimiter"])
                 word_col = self.config["data_format"]["coca_word_column"]
                 freq_col = self.config["data_format"]["coca_freq_column"]
@@ -204,6 +420,10 @@ class Wordlebot:
                             self.word_frequencies[word] = freq
                         except (ValueError, KeyError):
                             continue
+
+            if self.debug:
+                print(f"Loaded {len(self.word_frequencies)} COCA frequencies from file")
+
         except Exception as e:
             if self.debug:
                 print(f"Warning: Could not load COCA frequency data: {e}")
@@ -287,20 +507,130 @@ class Wordlebot:
         """Process response and return matching candidates"""
         self.assess(response)
 
-        # Filter wordlist
+        # Always use fast in-memory filtering (wordlist is cached locally)
         candidates = []
         for word in self.wordlist:
             if self._matches(word):
                 candidates.append(word)
 
+        # Sort by score (frequency)
+        candidates.sort(key=lambda w: self.score_word(w), reverse=True)
+
         # Exclude previous words if configured
         if self.guess_number >= self.config["wordle"]["exclude_previous_from_guess"]:
             candidates = [w for w in candidates if w not in self.previous_words]
 
-        # Sort by score
-        candidates.sort(key=lambda w: self.score_word(w), reverse=True)
-
         return candidates
+
+    def _build_es_query(self) -> Dict[str, Any]:
+        """Build Elasticsearch query from current game state."""
+        must_clauses = []
+        must_not_clauses = []
+
+        # Green letters: exact position matches
+        for i, char in enumerate(self.pattern):
+            if char != '.':
+                must_clauses.append({"term": {f"p{i}": char}})
+
+        # Yellow letters: must contain letter, but NOT at specific positions
+        for letter in self.known.get_letters():
+            # Must contain the letter
+            must_clauses.append({"term": {"letters": letter}})
+            # Must NOT be at forbidden positions
+            for pos in self.known.indices(letter):
+                must_not_clauses.append({"term": {f"p{pos}": letter}})
+
+        # Gray letters (bad): must NOT contain these letters
+        # But only if they have no minimum count (not also yellow/green)
+        for letter in self.bad:
+            if self.min_letter_counts.get(letter, 0) == 0:
+                must_not_clauses.append({"term": {"letters": letter}})
+
+        # Minimum letter counts: use script query for complex constraints
+        # This handles cases where a letter appears multiple times
+        script_conditions = []
+
+        for letter, min_count in self.min_letter_counts.items():
+            if min_count > 1:
+                # Need script to check letter_counts field
+                script_conditions.append(
+                    f"(doc['letter_counts.{letter}'].size() > 0 && doc['letter_counts.{letter}'].value >= {min_count})"
+                )
+
+        for letter, max_count in self.max_letter_counts.items():
+            # Check that letter count doesn't exceed max
+            script_conditions.append(
+                f"(doc['letter_counts.{letter}'].size() == 0 || doc['letter_counts.{letter}'].value <= {max_count})"
+            )
+
+        # Build the query
+        query: Dict[str, Any] = {"bool": {}}
+
+        if must_clauses:
+            query["bool"]["must"] = must_clauses
+        if must_not_clauses:
+            query["bool"]["must_not"] = must_not_clauses
+
+        # Add script filter for complex count constraints
+        if script_conditions:
+            script_source = " && ".join(script_conditions)
+            if "filter" not in query["bool"]:
+                query["bool"]["filter"] = []
+            query["bool"]["filter"].append({
+                "script": {
+                    "script": {
+                        "source": script_source,
+                        "lang": "painless"
+                    }
+                }
+            })
+
+        # If no constraints, match all
+        if not query["bool"]:
+            query = {"match_all": {}}
+
+        return query
+
+    def _query_es_candidates(self) -> List[str]:
+        """Query Elasticsearch for matching candidates."""
+        try:
+            query = self._build_es_query()
+
+            if self.debug:
+                import json
+                print(f"ES Query: {json.dumps(query, indent=2)}")
+
+            result = self.es_client.search(
+                index=self.es_index,
+                body={
+                    "query": query,
+                    "size": 10000,  # Get all matches
+                    "sort": [{"freq": "desc"}],  # Sort by frequency
+                    "_source": ["word", "freq"]
+                }
+            )
+
+            candidates = []
+            for hit in result["hits"]["hits"]:
+                word = hit["_source"]["word"]
+                freq = hit["_source"].get("freq", 0)
+                candidates.append(word)
+                # Cache frequency for scoring
+                if freq > 0:
+                    self.word_frequencies[word] = freq
+
+            if self.debug:
+                print(f"ES returned {len(candidates)} candidates")
+
+            return candidates
+
+        except Exception as e:
+            if self.debug:
+                print(f"ES query failed: {e}, falling back to client-side filtering")
+            # Fallback to client-side filtering
+            candidates = [word for word in self.wordlist if self._matches(word)]
+            candidates.sort(key=lambda w: self.score_word(w), reverse=True)
+            return candidates
 
     def _matches(self, word: str) -> bool:
         """Check if word matches current constraints"""
