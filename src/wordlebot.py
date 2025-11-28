@@ -169,6 +169,7 @@ class Wordlebot:
         self.known = KnownLetters()
         self.bad: List[str] = []
         self.min_letter_counts: Dict[str, int] = {}
+        self.max_letter_counts: Dict[str, int] = {}  # Track exact upper bounds
         self.guess_number = 0
         self.guesses: List[str] = []
 
@@ -237,11 +238,28 @@ class Wordlebot:
 
     def assess(self, response: str) -> None:
         """Process Wordle response and update state"""
+        guess = self.guesses[-1]
+
+        # First pass: count green and yellow occurrences for each letter in this guess
+        letter_hits: Dict[str, int] = {}  # Letters that are green or yellow
+        for i, char in enumerate(response):
+            if char.isupper():
+                letter = char.lower()
+                letter_hits[letter] = letter_hits.get(letter, 0) + 1
+            elif char.islower():
+                letter_hits[char] = letter_hits.get(char, 0) + 1
+
+        # Second pass: process the response
         for i, char in enumerate(response):
             if char == '?':
-                # Gray - letter not in solution
-                letter = self.guesses[-1][i]
-                if letter not in self.pattern and not self.known.has_letter(letter):
+                # Gray - letter not in solution at this position
+                letter = guess[i]
+                if letter in letter_hits:
+                    # This letter appeared as green/yellow elsewhere in this guess,
+                    # so gray here means we know the exact count
+                    self.max_letter_counts[letter] = letter_hits[letter]
+                elif letter not in self.pattern and not self.known.has_letter(letter):
+                    # Letter not in solution at all
                     self.bad.append(letter)
             elif char.isupper():
                 # Green - correct position
@@ -249,19 +267,21 @@ class Wordlebot:
                 new_pattern = list(self.pattern)
                 new_pattern[i] = letter
                 self.pattern = "".join(new_pattern)
-                # Update minimum count
-                self.min_letter_counts[letter] = max(
-                    self.min_letter_counts.get(letter, 0),
-                    self.pattern.count(letter) + sum(1 for l in self.known.get_letters() if l == letter)
-                )
+                # If this letter was previously yellow, remove it from known
+                # since it's now accounted for in the pattern
+                if letter in self.known.data:
+                    del self.known.data[letter]
             elif char.islower():
                 # Yellow - wrong position but in solution
                 self.known.add(char, i)
-                # Update minimum count
-                self.min_letter_counts[char] = max(
-                    self.min_letter_counts.get(char, 0),
-                    self.pattern.count(char) + sum(1 for l in self.known.get_letters() if l == char)
-                )
+
+        # After processing all positions, update minimum counts based on this guess
+        # Count green+yellow hits from this guess for each letter
+        for letter, hit_count in letter_hits.items():
+            self.min_letter_counts[letter] = max(
+                self.min_letter_counts.get(letter, 0),
+                hit_count
+            )
 
     def solve(self, response: str) -> List[str]:
         """Process response and return matching candidates"""
@@ -309,6 +329,11 @@ class Wordlebot:
         # Check minimum letter counts
         for letter, min_count in self.min_letter_counts.items():
             if word.count(letter) < min_count:
+                return False
+
+        # Check maximum letter counts (when we know exact count from gray duplicates)
+        for letter, max_count in self.max_letter_counts.items():
+            if word.count(letter) > max_count:
                 return False
 
         return True
