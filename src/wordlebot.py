@@ -773,8 +773,12 @@ def main() -> None:
                 )
 
             # In AI mode, don't show candidates if we'll show AI recommendation next
+            # Exception: auto-show all candidates if count <= ai.auto_show_all_threshold
+            ai_auto_show_threshold = wb.config.get('ai', {}).get('auto_show_all_threshold', 10)
             if not ai_components or len(solutions) <= 1:
                 print(f"{i} | {wb.display_candidates(solutions, max_display)}")
+            elif ai_components and len(solutions) <= ai_auto_show_threshold:
+                print(f"{i} | {wb.display_candidates(solutions, max_display, show_all=True)}")
 
             if len(solutions) <= 1:
                 if len(solutions) == 1:

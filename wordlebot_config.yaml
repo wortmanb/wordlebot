@@ -137,3 +137,6 @@ ai:
 
   # Performance logging
   performance_log_file: "~/.cache/wordlebot/performance.log"
+
+  # Auto-show all candidates when count is at or below this threshold
+  auto_show_all_threshold: 10
