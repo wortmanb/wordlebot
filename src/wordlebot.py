@@ -749,6 +749,7 @@ AI Mode (--ai flag):
 
 Commands:
   m or more = show all candidates
+  n or next = reject AI recommendation, show next-best (AI mode only)
   q or quit = exit
 """
 
@@ -937,16 +938,72 @@ def main() -> None:
                             if args.debug:
                                 print("Warning: Failed to cache optimal first guess to .env")
 
-                    first_guess_info_gain = info_gain_calc.calculate_information_gain(optimal_first, wb.wordlist)
-                    print(f'AI recommends optimal opening: "{optimal_first}" (info gain: {first_guess_info_gain:.2f} bits)')
-                    guess = input(f"{i} | Guess (press Enter to use AI recommendation): ")
-                    if not guess:
-                        guess = optimal_first
-                        last_guess_info_gain = first_guess_info_gain
-                        print(f'{i} | Using AI recommendation: "{guess}"')
-                    else:
-                        # Calculate info gain for user's guess
-                        last_guess_info_gain = info_gain_calc.calculate_information_gain(guess, wb.wordlist)
+                    # Rejection loop for first guess
+                    rejected_words: Set[str] = set()
+                    first_guess_info_gains: Dict[str, float] = {}
+                    guess = None
+
+                    while guess is None:
+                        if not rejected_words:
+                            # First time: use the optimal first guess
+                            ai_recommended = optimal_first
+                            if optimal_first not in first_guess_info_gains:
+                                first_guess_info_gains[optimal_first] = info_gain_calc.calculate_information_gain(
+                                    optimal_first, wb.wordlist
+                                )
+                            recommended_info_gain = first_guess_info_gains[optimal_first]
+                            print(f'AI recommends optimal opening: "{ai_recommended}" (info gain: {recommended_info_gain:.2f} bits)')
+                        else:
+                            # User rejected previous recommendation - find next best
+                            # Sort words by score (frequency) and evaluate top candidates
+                            if len(first_guess_info_gains) < 50:
+                                print("Calculating alternatives (this may take a moment)...", flush=True)
+                                sorted_by_score = sorted(
+                                    wb.wordlist, key=lambda w: wb.score_word(w), reverse=True
+                                )
+                                # Evaluate top 100 words by frequency
+                                for word in sorted_by_score[:100]:
+                                    if word not in first_guess_info_gains:
+                                        first_guess_info_gains[word] = info_gain_calc.calculate_information_gain(
+                                            word, wb.wordlist
+                                        )
+
+                            # Get best available option
+                            available = [
+                                (w, ig) for w, ig in first_guess_info_gains.items()
+                                if w not in rejected_words
+                            ]
+                            available.sort(key=lambda x: x[1], reverse=True)
+
+                            if not available:
+                                print("No more recommendations available.")
+                                guess = input(f"{i} | Guess: ")
+                                break
+
+                            ai_recommended = available[0][0]
+                            recommended_info_gain = available[0][1]
+                            remaining = len(available)
+                            print(f'Next recommendation: "{ai_recommended}" (info gain: {recommended_info_gain:.2f} bits) [{remaining} options left]')
+
+                        user_input = input(f"{i} | Guess (Enter=accept, n=next): ")
+
+                        if user_input.lower() in ["n", "next"]:
+                            rejected_words.add(ai_recommended)
+                            print(f'Rejected "{ai_recommended}", finding next best...')
+                            continue
+                        elif not user_input:
+                            guess = ai_recommended
+                            last_guess_info_gain = recommended_info_gain
+                            print(f'{i} | Using AI recommendation: "{guess}"')
+                        elif user_input.lower() in ["q", "quit"]:
+                            guess = user_input  # Will be handled by quit check below
+                        elif user_input.lower() in ["m", "more"]:
+                            guess = user_input  # Will be handled by more check below
+                        else:
+                            guess = user_input
+                            # Calculate info gain for user's guess
+                            last_guess_info_gain = info_gain_calc.calculate_information_gain(guess, wb.wordlist)
+
                 except Exception as e:
                     print(f"Error calculating optimal first guess: {e}")
                     if args.debug:
@@ -958,8 +1015,10 @@ def main() -> None:
                 guess = "crane"
                 print(f'Using initial guess "{guess}"')
             else:
-                guess = wb.config["defaults"]["initial_guess"]
-                print(f'Using default initial guess "{guess}"')
+                default_guess = wb.config["defaults"]["initial_guess"]
+                guess = input(f"{i} | Guess (or press Enter for '{default_guess}'): ")
+                if not guess:
+                    guess = default_guess
         else:
             # Subsequent guesses
             if ai_components and current_candidates:
@@ -985,74 +1044,103 @@ def main() -> None:
                             print(f"  Progress: {idx + 1}/{len(candidates_to_evaluate)} candidates...", flush=True)
 
                     # Sort by information gain
-                    sorted_candidates = sorted(
+                    sorted_by_info_gain = sorted(
                         info_gains.items(), key=lambda x: x[1], reverse=True
                     )
 
-                    # Get top candidate
-                    if sorted_candidates:
-                        best_word = sorted_candidates[0][0]
-                        best_info_gain = sorted_candidates[0][1]
+                    # Rejection loop: allow user to reject recommendations
+                    rejected_words: Set[str] = set()
+                    guess = None
 
-                        # Get strategic recommendation from Claude
-                        print("Consulting Claude AI for strategic recommendation...", flush=True)
-                        game_state = claude_strategy.format_game_state(wb)
-                        strategy_mode = ai_components['strategy_mode']
+                    while guess is None:
+                        # Filter out rejected words
+                        available_candidates = [
+                            (word, ig) for word, ig in sorted_by_info_gain
+                            if word not in rejected_words
+                        ]
 
-                        try:
-                            recommendation = claude_strategy.recommend_guess(
-                                game_state=game_state,
-                                candidates=current_candidates[:20],  # Top 20 for Claude
-                                info_gains=info_gains,
-                                strategy_mode=str(strategy_mode),
-                                debug=args.debug
-                            )
+                        if not available_candidates:
+                            print("No more recommendations available.")
+                            guess = input(f"{i} | Guess: ")
+                            break
 
-                            # Display AI recommendation
-                            if recommendation:
-                                if verbose:
-                                    ai_display.display_ai_recommendation_verbose(
-                                        word=recommendation.get('word', best_word),
-                                        info_gain=recommendation.get('info_gain', best_info_gain),
-                                        reasoning=recommendation.get('reasoning', ''),
-                                        alternatives=recommendation.get('alternatives', []),
-                                        metrics=recommendation.get('metrics', {}),
-                                        config=wb.config
-                                    )
+                        best_word = available_candidates[0][0]
+                        best_info_gain = available_candidates[0][1]
+
+                        # Get strategic recommendation from Claude (only on first pass)
+                        if not rejected_words:
+                            print("Consulting Claude AI for strategic recommendation...", flush=True)
+                            game_state = claude_strategy.format_game_state(wb)
+                            strategy_mode = ai_components['strategy_mode']
+
+                            try:
+                                recommendation = claude_strategy.recommend_guess(
+                                    game_state=game_state,
+                                    candidates=current_candidates[:20],  # Top 20 for Claude
+                                    info_gains=info_gains,
+                                    strategy_mode=str(strategy_mode),
+                                    debug=args.debug
+                                )
+
+                                # Display AI recommendation
+                                if recommendation:
+                                    if verbose:
+                                        ai_display.display_ai_recommendation_verbose(
+                                            word=recommendation.get('word', best_word),
+                                            info_gain=recommendation.get('info_gain', best_info_gain),
+                                            reasoning=recommendation.get('reasoning', ''),
+                                            alternatives=recommendation.get('alternatives', []),
+                                            metrics=recommendation.get('metrics', {}),
+                                            config=wb.config
+                                        )
+                                    else:
+                                        ai_display.display_ai_recommendation_normal(
+                                            word=recommendation.get('word', best_word),
+                                            info_gain=recommendation.get('info_gain', best_info_gain)
+                                        )
+
+                                    ai_recommended = recommendation.get('word', best_word)
+                                    recommended_info_gain = recommendation.get('info_gain', best_info_gain)
                                 else:
-                                    ai_display.display_ai_recommendation_normal(
-                                        word=recommendation.get('word', best_word),
-                                        info_gain=recommendation.get('info_gain', best_info_gain)
-                                    )
+                                    # Fallback if API failed
+                                    ai_recommended = best_word
+                                    recommended_info_gain = best_info_gain
+                                    print(f"AI recommendation (fallback): {best_word} (info gain: {best_info_gain:.2f} bits)")
 
-                                ai_recommended = recommendation.get('word', best_word)
-                                recommended_info_gain = recommendation.get('info_gain', best_info_gain)
-                            else:
-                                # Fallback if API failed
+                            except Exception as e:
+                                print(f"Claude API error: {e}")
+                                if args.debug:
+                                    import traceback
+                                    print(traceback.format_exc())
+                                # Fall back to information gain
                                 ai_recommended = best_word
                                 recommended_info_gain = best_info_gain
                                 print(f"AI recommendation (fallback): {best_word} (info gain: {best_info_gain:.2f} bits)")
-
-                        except Exception as e:
-                            print(f"Claude API error: {e}")
-                            if args.debug:
-                                import traceback
-                                print(traceback.format_exc())
-                            # Fall back to information gain
+                        else:
+                            # For rejected words, just use info gain ranking
                             ai_recommended = best_word
                             recommended_info_gain = best_info_gain
-                            print(f"AI recommendation (fallback): {best_word} (info gain: {best_info_gain:.2f} bits)")
+                            remaining = len(available_candidates)
+                            print(f"Next recommendation: {best_word} (info gain: {best_info_gain:.2f} bits) [{remaining} options left]")
 
-                        guess = input(f"{i} | Guess (press Enter to use AI recommendation): ")
-                        if not guess:
+                        user_input = input(f"{i} | Guess (Enter=accept, n=next): ")
+
+                        if user_input.lower() in ["n", "next"]:
+                            rejected_words.add(ai_recommended)
+                            print(f'Rejected "{ai_recommended}", finding next best...')
+                            continue
+                        elif not user_input:
                             guess = ai_recommended
                             last_guess_info_gain = recommended_info_gain
                             print(f'{i} | Using AI recommendation: "{guess}"')
+                        elif user_input.lower() in ["q", "quit"]:
+                            guess = user_input  # Will be handled by quit check below
+                        elif user_input.lower() in ["m", "more"]:
+                            guess = user_input  # Will be handled by more check below
                         else:
+                            guess = user_input
                             # Calculate info gain for user's guess
                             last_guess_info_gain = info_gains.get(guess, 0.0)
-                    else:
-                        guess = input(f"{i} | Guess: ")
 
                 except Exception as e:
                     print(f"Error during AI recommendation: {e}")
