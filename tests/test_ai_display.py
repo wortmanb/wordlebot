@@ -204,3 +204,124 @@ class TestAIDisplay:
         long_lines = [line for line in lines if len(line.strip()) > 80]
         # Allow a few long lines for special cases, but most should fit
         assert len(long_lines) < len(lines) / 2, "Too many lines exceed terminal width"
+
+
+class TestAIDisplayIntegration:
+    """Integration tests for AI display functions"""
+
+    @pytest.fixture
+    def mock_config(self) -> Dict:
+        """Create mock config for testing"""
+        return {
+            'display': {
+                'min_terminal_width': 40,
+                'default_terminal_width': 80,
+            }
+        }
+
+    def test_display_ai_recommendation_normal_mode(self, mock_config: Dict):
+        """Test display_ai_recommendation with verbose=False"""
+        from src.ai_display import display_ai_recommendation
+
+        output = display_ai_recommendation(
+            word='crane',
+            info_gain=5.85,
+            config=mock_config,
+            verbose=False
+        )
+
+        assert 'crane' in output.lower()
+        assert '5.85' in output or '5.9' in output
+
+    def test_display_ai_recommendation_verbose_mode(self, mock_config: Dict):
+        """Test display_ai_recommendation with verbose=True"""
+        from src.ai_display import display_ai_recommendation
+
+        output = display_ai_recommendation(
+            word='crane',
+            info_gain=5.85,
+            reasoning="This is the best guess",
+            alternatives=[{'word': 'slate', 'info_gain': 5.8, 'note': 'close'}],
+            metrics={'entropy': 10.0},
+            config=mock_config,
+            verbose=True
+        )
+
+        assert 'crane' in output.lower()
+        assert 'reasoning' in output.lower() or 'strategic' in output.lower()
+
+    def test_display_ai_recommendation_default_config(self):
+        """Test display_ai_recommendation works without config"""
+        from src.ai_display import display_ai_recommendation
+
+        output = display_ai_recommendation(
+            word='slate',
+            info_gain=5.2,
+            verbose=False
+        )
+
+        assert 'slate' in output.lower()
+
+    def test_display_ai_summary(self, mock_config: Dict):
+        """Test display_ai_summary returns formatted output"""
+        from src.ai_display import display_ai_summary
+
+        output = display_ai_summary(
+            total_guesses=4,
+            api_call_count=3,
+            total_cost=0.0025,
+            avg_response_time=1.5,
+            total_solving_time=15.3,
+            config=mock_config
+        )
+
+        assert 'guesses' in output.lower()
+        assert '4' in output
+        assert 'api' in output.lower()
+        assert '3' in output
+        assert 'cost' in output.lower()
+
+    def test_format_alternatives_empty_list(self):
+        """Test format_alternatives_table with empty list"""
+        output = format_alternatives_table([], terminal_width=80)
+        assert 'no alternatives' in output.lower()
+
+    def test_format_metrics_empty_dict(self):
+        """Test format_metrics_section with empty dict"""
+        output = format_metrics_section({}, terminal_width=80)
+        assert 'no metrics' in output.lower()
+
+
+class TestAIDisplayHelpers:
+    """Test helper functions in ai_display module"""
+
+    def test_get_terminal_width_returns_int(self):
+        """Test get_terminal_width returns integer"""
+        from src.ai_display import get_terminal_width
+
+        config = {'display': {'min_terminal_width': 40, 'default_terminal_width': 80}}
+        width = get_terminal_width(config)
+
+        assert isinstance(width, int)
+        assert width >= 40
+
+    def test_wrap_text_with_indent(self):
+        """Test wrap_text properly indents"""
+        from src.ai_display import wrap_text
+
+        text = "This is a short text"
+        wrapped = wrap_text(text, width=80, indent=4)
+
+        assert wrapped.startswith('    '), "Should start with 4 spaces indent"
+
+    def test_wrap_text_respects_width(self):
+        """Test wrap_text respects max width"""
+        from src.ai_display import wrap_text
+
+        text = "This is a very long text that should be wrapped when it exceeds the maximum width limit"
+        wrapped = wrap_text(text, width=40, indent=0)
+
+        lines = wrapped.split('\n')
+        # Most lines should respect width (some flexibility for word boundaries)
+        for line in lines:
+            assert len(line) <= 50, f"Line too long: {len(line)}"
