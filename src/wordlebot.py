@@ -725,7 +725,8 @@ class Wordlebot:
             if count > top_count:
                 result += f"\n  ... and {count - top_count} more candidates"
                 result += "\n  (Enter 'm' or 'more' to see all candidates)"
-            return result
+
+        return result
 
     def help_msg(self) -> str:
         """Return help message"""
