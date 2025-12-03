@@ -7,7 +7,7 @@ jobs:
   generate_docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Generate documentation
         uses: textcortex/claude-code-pr-autodoc-action@v1 # Example action for documentation
         with:
