@@ -471,7 +471,7 @@ class Wordlebot:
 
         # Second pass: process the response
         for i, char in enumerate(response):
-            if char == '?':
+            if char in ('?', '.'):
                 # Gray - letter not in solution at this position
                 letter = guess[i]
                 if letter in letter_hits:
@@ -736,12 +736,12 @@ Wordlebot - AI-powered Wordle Assistant
 Response format:
   CAPITALS = green (correct position)
   lowercase = yellow (in word, wrong position)
-  ? = gray (not in solution)
+  . or ? = gray (not in solution)
 
-Example: If you guess "SLATE" and get back "S???E"
+Example: If you guess "SLATE" and get back "S...e"
   S is in the correct position
   L, A, T are not in the word
-  E is in the word but wrong position
+  e is in the word but wrong position
 
 AI Mode (--ai flag):
   - Information gain-based recommendations
@@ -757,6 +757,7 @@ Hard Mode (--ai --hard flags):
 Commands:
   m or more = show all candidates
   n or next = reject AI recommendation, show next-best (AI mode only)
+  h or hard = switch to hard mode (only valid candidates)
   q or quit = exit
 """
 
@@ -1232,6 +1233,13 @@ def main() -> None:
             else:
                 print("No candidates to display")
             continue
+        elif guess.lower() in ["h", "hard"]:
+            if ai_components:
+                ai_components['insight_mode'] = False
+                print("Switched to hard mode - only suggesting valid candidates")
+            else:
+                print("Hard mode toggle only available in AI mode (--ai)")
+            continue
 
         if not guess or len(guess) != 5:
             print("Please enter a 5-letter word")
@@ -1264,6 +1272,11 @@ def main() -> None:
                 print(f"{i} | {wb.display_candidates(solutions, max_display)}")
             elif ai_components and len(solutions) <= ai_auto_show_threshold:
                 print(f"{i} | {wb.display_candidates(solutions, max_display, show_all=True)}")
+
+            # Auto-switch to hard mode when candidates drop below 10
+            if ai_components and ai_components.get('insight_mode') and len(solutions) < 10 and len(solutions) > 1:
+                ai_components['insight_mode'] = False
+                print("Auto-switched to hard mode (< 10 candidates remaining)")
 
             if len(solutions) <= 1:
                 if len(solutions) == 1:
