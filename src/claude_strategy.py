@@ -102,6 +102,9 @@ class ClaudeStrategy:
         candidates: List[str],
         info_gains: Dict[str, float],
         strategy_mode: str,
+        insight_mode: bool = False,
+        insight_words: Optional[set] = None,
+        top_suggestions: Optional[List[str]] = None,
     ) -> str:
         """
         Engineer Claude API prompt with game state, candidates, and strategy.
@@ -114,18 +117,48 @@ class ClaudeStrategy:
 
         Args:
             game_state: Serialized game state from format_game_state()
-            candidates: List of remaining candidate words
+            candidates: List of remaining candidate words (valid answers)
             info_gains: Dictionary mapping words to information gain scores
             strategy_mode: Strategy mode (aggressive, safe, balanced)
+            insight_mode: If True, allow suggesting non-candidate "insight" words
+            insight_words: Set of words that are insight-only (not valid answers)
+            top_suggestions: In insight mode, the top words by info gain (may include non-candidates)
 
         Returns:
             Formatted prompt string for Claude API
         """
-        # Build candidate list with info gains
-        candidates_with_scores = []
-        for word in candidates[:20]:  # Limit to top 20 for prompt efficiency
-            score = info_gains.get(word, 0.0)
-            candidates_with_scores.append(f"{word}: {score:.2f} bits")
+        # Build word list with info gains
+        if insight_mode and top_suggestions:
+            # In insight mode, show top suggestions with insight markers
+            words_with_scores = []
+            for word in top_suggestions[:20]:
+                score = info_gains.get(word, 0.0)
+                marker = " [INSIGHT - not a valid answer]" if insight_words and word in insight_words else ""
+                words_with_scores.append(f"{word}: {score:.2f} bits{marker}")
+            words_section = f"""Top Suggestions by Information Gain (insight mode):
+{chr(10).join(words_with_scores)}
+
+Valid Candidates (can be the answer):
+{', '.join(candidates[:15])}"""
+        else:
+            # Standard mode: only show candidates
+            words_with_scores = []
+            for word in candidates[:20]:
+                score = info_gains.get(word, 0.0)
+                words_with_scores.append(f"{word}: {score:.2f} bits")
+            words_section = f"""Remaining Candidates with Information Gain Scores:
+{chr(10).join(words_with_scores)}"""
+
+        insight_instructions = ""
+        if insight_mode:
+            insight_instructions = """
+INSIGHT MODE ENABLED:
+- You may recommend words marked [INSIGHT] that CANNOT be the answer
+- These "insight words" are strategically valuable because they reveal more information
+- Consider: Is the extra information worth using a guess that can't win?
+- Generally prefer insight words when many candidates remain (>10)
+- Prefer valid candidates when few candidates remain (<5)
+"""
 
         prompt = f"""You are a strategic Wordle assistant helping to select the optimal guess.
 
@@ -139,9 +172,8 @@ Strategy Mode: {strategy_mode}
 - aggressive: Minimize average guess count (optimize for typical cases)
 - safe: Minimize worst-case scenarios (avoid risky guesses)
 - balanced: Compromise between average and worst-case
-
-Remaining Candidates with Information Gain Scores:
-{chr(10).join(candidates_with_scores)}
+{insight_instructions}
+{words_section}
 
 Your task:
 1. Analyze the game state and remaining candidates
@@ -154,6 +186,7 @@ Respond ONLY with valid JSON in this exact format:
   "word": "selected_word",
   "reasoning": "Brief explanation of why this word is optimal for the {strategy_mode} strategy",
   "info_gain": 5.2,
+  "is_insight_word": false,
   "alternatives": [
     {{"word": "alternative1", "info_gain": 5.1, "note": "Why this was close"}},
     {{"word": "alternative2", "info_gain": 5.0, "note": "Another consideration"}}
@@ -320,7 +353,10 @@ Important: Your response must be valid JSON only, no additional text."""
         candidates: List[str],
         info_gains: Dict[str, float],
         strategy_mode: str,
-        debug: bool = False
+        debug: bool = False,
+        insight_mode: bool = False,
+        insight_words: Optional[set] = None,
+        top_suggestions: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Get strategic guess recommendation from Claude API.
@@ -334,6 +370,9 @@ Important: Your response must be valid JSON only, no additional text."""
             info_gains: Dictionary mapping words to information gain scores
             strategy_mode: Strategy mode (aggressive, safe, balanced)
             debug: If True, enable debug logging
+            insight_mode: If True, allow suggesting non-candidate "insight" words
+            insight_words: Set of words that are insight-only (not valid answers)
+            top_suggestions: In insight mode, the top words by info gain
 
         Returns:
             Dictionary with recommendation data:
@@ -348,7 +387,10 @@ Important: Your response must be valid JSON only, no additional text."""
             game_state=game_state,
             candidates=candidates,
             info_gains=info_gains,
-            strategy_mode=strategy_mode
+            strategy_mode=strategy_mode,
+            insight_mode=insight_mode,
+            insight_words=insight_words,
+            top_suggestions=top_suggestions,
         )
 
         # Call API

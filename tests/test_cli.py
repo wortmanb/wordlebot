@@ -97,6 +97,13 @@ def parse_args(args: List[str]) -> argparse.Namespace:
         default=False,
         help="Force recalculation of optimal first guess",
     )
+    parser.add_argument(
+        "--hard",
+        action="store_true",
+        dest="hard_mode",
+        default=False,
+        help="Enable hard mode: only suggest words that could be the answer",
+    )
 
     return parser.parse_args(args)
 
@@ -212,3 +219,19 @@ class TestCLIArgumentParsing:
         """Test --recalculate-first-guess defaults to False"""
         args = parse_args(["--ai"])
         assert args.recalculate_first_guess is False, "Recalculate flag should default to False"
+
+    def test_hard_mode_flag_default_false(self):
+        """Test --hard flag defaults to False (insight mode is default)"""
+        args = parse_args([])
+        assert args.hard_mode is False, "Hard mode should be disabled by default"
+
+    def test_hard_mode_flag_enabled(self):
+        """Test --hard flag enables hard mode"""
+        args = parse_args(["--hard"])
+        assert args.hard_mode is True, "--hard flag should enable hard mode"
+
+    def test_hard_mode_with_ai_combined(self):
+        """Test combining --ai and --hard flags"""
+        args = parse_args(["--ai", "--hard"])
+        assert args.ai is True, "AI mode should be enabled"
+        assert args.hard_mode is True, "Hard mode should be enabled"

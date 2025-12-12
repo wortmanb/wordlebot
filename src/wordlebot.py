@@ -747,6 +747,12 @@ AI Mode (--ai flag):
   - Information gain-based recommendations
   - Claude API strategic reasoning
   - Multi-step lookahead analysis
+  - Default: insight mode (may suggest non-answer words)
+  - Words marked [INSIGHT] can't be the answer but reveal more info
+
+Hard Mode (--ai --hard flags):
+  - Only suggests words that could be the answer
+  - Wordle hard mode compliant
 
 Commands:
   m or more = show all candidates
@@ -832,6 +838,13 @@ def main() -> None:
         default=False,
         help="Force recalculation of optimal first guess (ignores cached value in .env)",
     )
+    parser.add_argument(
+        "--hard",
+        action="store_true",
+        dest="hard_mode",
+        default=False,
+        help="Enable hard mode: only suggest words that could be the answer (Wordle hard mode compliant)",
+    )
     args = parser.parse_args()
 
     wb = Wordlebot(args.debug, args.config)
@@ -884,6 +897,9 @@ def main() -> None:
                 info_gain_calculator=info_gain_calc
             )
 
+            # Insight mode is the default; --hard disables it
+            insight_mode = not args.hard_mode
+
             ai_components = {
                 'info_gain_calc': info_gain_calc,
                 'claude_strategy': claude_strategy,
@@ -891,9 +907,11 @@ def main() -> None:
                 'strategy_mode': strategy_mode,
                 'verbose': args.verbose,
                 'performance_logger': performance_logger,
+                'insight_mode': insight_mode,
             }
 
-            print(f"AI mode enabled with strategy: {strategy_mode} (lookahead depth: {lookahead_depth})")
+            mode_msg = " (hard mode)" if args.hard_mode else " (insight mode)"
+            print(f"AI mode enabled with strategy: {strategy_mode} (lookahead depth: {lookahead_depth}){mode_msg}")
 
         except Exception as e:
             print(f"Error initializing AI components: {e}")
@@ -1029,20 +1047,60 @@ def main() -> None:
                     claude_strategy = ai_components['claude_strategy']
                     verbose = ai_components['verbose']
 
+                    insight_mode = ai_components.get('insight_mode', False)
                     print(f"Analyzing {len(current_candidates)} remaining candidates...")
 
-                    # Calculate information gains for all candidates
+                    # Calculate information gains
                     info_gains = {}
-                    candidates_to_evaluate = current_candidates[:50]  # Limit for performance
-                    print(f"Calculating information gain for top {len(candidates_to_evaluate)} candidates...", flush=True)
+                    insight_words: Set[str] = set()  # Track non-candidate insight words
 
-                    for idx, candidate in enumerate(candidates_to_evaluate):
-                        info_gains[candidate] = info_gain_calc.calculate_information_gain(
-                            candidate, current_candidates
+                    if insight_mode and len(current_candidates) > 2:
+                        # Insight mode: evaluate words from full wordlist for max information
+                        # Use a hybrid sampling strategy:
+                        # 1. All current candidates (to compare insight vs hard mode)
+                        # 2. Top frequent words (common words are good for insight)
+                        # 3. Words with diverse unique letters (for maximum info gain potential)
+                        words_to_evaluate_set: Set[str] = set()
+
+                        # Include all candidates
+                        words_to_evaluate_set.update(current_candidates)
+
+                        # Add top 200 by frequency
+                        sorted_by_freq = sorted(
+                            wb.wordlist, key=lambda w: wb.score_word(w), reverse=True
                         )
-                        # Show progress for larger candidate sets
-                        if len(candidates_to_evaluate) > 10 and (idx + 1) % 10 == 0:
-                            print(f"  Progress: {idx + 1}/{len(candidates_to_evaluate)} candidates...", flush=True)
+                        words_to_evaluate_set.update(sorted_by_freq[:200])
+
+                        # Add words with 5 unique letters (often best for info gain)
+                        unique_letter_words = [w for w in wb.wordlist if len(set(w)) == 5]
+                        # Prioritize by frequency among unique-letter words
+                        unique_letter_words.sort(key=lambda w: wb.score_word(w), reverse=True)
+                        words_to_evaluate_set.update(unique_letter_words[:200])
+
+                        words_to_evaluate = list(words_to_evaluate_set)
+                        print(f"Insight mode: Calculating information gain for {len(words_to_evaluate)} words...", flush=True)
+
+                        for idx, word in enumerate(words_to_evaluate):
+                            info_gains[word] = info_gain_calc.calculate_information_gain(
+                                word, current_candidates
+                            )
+                            # Track if this word is NOT a valid candidate (insight-only)
+                            if word not in current_candidates:
+                                insight_words.add(word)
+                            if (idx + 1) % 50 == 0:
+                                print(f"  Progress: {idx + 1}/{len(words_to_evaluate)} words...", flush=True)
+                    else:
+                        # Standard mode: only evaluate valid candidates
+                        candidates_to_evaluate = current_candidates[:50]  # Limit for performance
+                        print(f"Calculating information gain for top {len(candidates_to_evaluate)} candidates...", flush=True)
+
+                        for idx, candidate in enumerate(candidates_to_evaluate):
+                            info_gains[candidate] = info_gain_calc.calculate_information_gain(
+                                candidate, current_candidates
+                            )
+                            # Show progress for larger candidate sets
+                            if len(candidates_to_evaluate) > 10 and (idx + 1) % 10 == 0:
+                                print(f"  Progress: {idx + 1}/{len(candidates_to_evaluate)} candidates...", flush=True)
 
                     # Sort by information gain
                     sorted_by_info_gain = sorted(
@@ -1075,12 +1133,17 @@ def main() -> None:
                             strategy_mode = ai_components['strategy_mode']
 
                             try:
+                                # In insight mode, pass top words by info gain (may include non-candidates)
+                                top_words_for_claude = [w for w, _ in sorted_by_info_gain[:20]]
                                 recommendation = claude_strategy.recommend_guess(
                                     game_state=game_state,
-                                    candidates=current_candidates[:20],  # Top 20 for Claude
+                                    candidates=current_candidates[:20],  # Actual valid candidates
                                     info_gains=info_gains,
                                     strategy_mode=str(strategy_mode),
-                                    debug=args.debug
+                                    debug=args.debug,
+                                    insight_mode=insight_mode,
+                                    insight_words=insight_words,
+                                    top_suggestions=top_words_for_claude if insight_mode else None
                                 )
 
                                 # Display AI recommendation
@@ -1106,7 +1169,8 @@ def main() -> None:
                                     # Fallback if API failed
                                     ai_recommended = best_word
                                     recommended_info_gain = best_info_gain
-                                    print(f"AI recommendation (fallback): {best_word} (info gain: {best_info_gain:.2f} bits)")
+                                    insight_marker = " [INSIGHT]" if best_word in insight_words else ""
+                                    print(f"AI recommendation (fallback): {best_word} (info gain: {best_info_gain:.2f} bits){insight_marker}")
 
                             except Exception as e:
                                 print(f"Claude API error: {e}")
@@ -1116,13 +1180,15 @@ def main() -> None:
                                 # Fall back to information gain
                                 ai_recommended = best_word
                                 recommended_info_gain = best_info_gain
-                                print(f"AI recommendation (fallback): {best_word} (info gain: {best_info_gain:.2f} bits)")
+                                insight_marker = " [INSIGHT]" if best_word in insight_words else ""
+                                print(f"AI recommendation (fallback): {best_word} (info gain: {best_info_gain:.2f} bits){insight_marker}")
                         else:
                             # For rejected words, just use info gain ranking
                             ai_recommended = best_word
                             recommended_info_gain = best_info_gain
                             remaining = len(available_candidates)
-                            print(f"Next recommendation: {best_word} (info gain: {best_info_gain:.2f} bits) [{remaining} options left]")
+                            insight_marker = " [INSIGHT]" if best_word in insight_words else ""
+                            print(f"Next recommendation: {best_word} (info gain: {best_info_gain:.2f} bits) [{remaining} options left]{insight_marker}")
 
                         user_input = input(f"{i} | Guess (Enter=accept, n=next): ")
 
