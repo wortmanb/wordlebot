@@ -11,6 +11,19 @@ import textwrap
 from typing import Any, Dict, List, Optional
 
 
+# ANSI color codes for terminal output
+class Colors:
+    """ANSI escape codes for terminal coloring."""
+    BOLD = "\033[1m"
+    GREEN = "\033[92m"
+    CYAN = "\033[96m"
+    YELLOW = "\033[93m"
+    MAGENTA = "\033[95m"
+    RESET = "\033[0m"
+    # Combined styles
+    HIGHLIGHT = BOLD + CYAN  # For recommended words
+
+
 def get_terminal_width(config: Dict[str, Any]) -> int:
     """
     Get terminal width from config or detect dynamically.
@@ -148,9 +161,10 @@ def display_ai_recommendation_normal(
     Returns:
         Formatted output string for normal mode
     """
-    # Build minimal output - just the essential info
+    # Build minimal output with highlighted word
+    highlighted_word = f"{Colors.HIGHLIGHT}{word.upper()}{Colors.RESET}"
     output_lines = [
-        f"AI Recommendation: {word.upper()} (info gain: {info_gain:.2f} bits)",
+        f"AI Recommendation: {highlighted_word} (info gain: {info_gain:.2f} bits)",
     ]
 
     return '\n'.join(output_lines)
@@ -198,9 +212,10 @@ def display_ai_recommendation_verbose(
         "",
     ]
 
-    # Recommended word and info gain (prominent display)
+    # Recommended word and info gain (prominent display with highlighting)
+    highlighted_word = f"{Colors.HIGHLIGHT}{word.upper()}{Colors.RESET}"
     output_lines.extend([
-        f"RECOMMENDED GUESS: {word.upper()}",
+        f"RECOMMENDED GUESS: {highlighted_word}",
         f"Information Gain: {info_gain:.2f} bits",
         "",
     ])

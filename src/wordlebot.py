@@ -48,6 +48,18 @@ except ModuleNotFoundError:
 
 HOME: str = str(Path.home())
 
+# ANSI color codes for terminal output
+class Colors:
+    """ANSI escape codes for terminal coloring."""
+    BOLD = "\033[1m"
+    GREEN = "\033[92m"
+    CYAN = "\033[96m"
+    YELLOW = "\033[93m"
+    MAGENTA = "\033[95m"
+    RESET = "\033[0m"
+    # Combined styles
+    HIGHLIGHT = BOLD + CYAN  # For recommended words
+
 
 def load_config() -> Dict[str, Any]:
     """Load configuration from YAML file"""
@@ -875,14 +887,23 @@ class Wordlebot:
 
         return freq_score
 
-    def display_candidates(self, candidates: List[str], max_display: int, show_all: bool = False) -> str:
-        """Format candidates for display"""
+    def display_candidates(
+        self,
+        candidates: List[str],
+        max_display: int,
+        show_all: bool = False,
+        highlight_first: bool = True,
+    ) -> str:
+        """Format candidates for display with optional highlighting of top recommendation."""
         if not candidates:
             return "No matching words found"
 
         count = len(candidates)
         if count == 1:
-            return f"Solution: {candidates[0]}"
+            word = candidates[0]
+            if highlight_first:
+                word = f"{Colors.HIGHLIGHT}{word}{Colors.RESET}"
+            return f"Solution: {word}"
 
         # Determine how many to show
         if show_all:
@@ -893,18 +914,28 @@ class Wordlebot:
         # Get terminal width
         try:
             terminal_width = shutil.get_terminal_size().columns
-        except:
+        except Exception:
             terminal_width = self.config["display"]["default_terminal_width"]
 
         terminal_width = max(terminal_width, self.config["display"]["min_terminal_width"])
         word_width = self.config["display"]["word_display_width"]
         words_per_row = max(1, terminal_width // word_width)
 
-        # Format words
+        # Format words - highlight the first word (top recommendation)
         rows = []
+        word_index = 0
         for i in range(0, top_count, words_per_row):
             row_words = candidates[i:i + words_per_row]
-            row = "  ".join(f"{word:>{word_width-2}}" for word in row_words)
+            formatted_words = []
+            for word in row_words:
+                if word_index == 0 and highlight_first:
+                    # Highlight the first word (top recommendation)
+                    formatted_word = f"{Colors.HIGHLIGHT}{word:>{word_width-2}}{Colors.RESET}"
+                else:
+                    formatted_word = f"{word:>{word_width-2}}"
+                formatted_words.append(formatted_word)
+                word_index += 1
+            row = "  ".join(formatted_words)
             rows.append(row)
 
         if count <= self.config["display"]["show_frequencies_threshold"]:
@@ -1167,7 +1198,8 @@ def main() -> None:
                                     optimal_first, wb.wordlist
                                 )
                             recommended_info_gain = first_guess_info_gains[optimal_first]
-                            print(f'AI recommends optimal opening: "{ai_recommended}" (info gain: {recommended_info_gain:.2f} bits)')
+                            highlighted_word = f"{Colors.HIGHLIGHT}{ai_recommended.upper()}{Colors.RESET}"
+                            print(f'AI recommends optimal opening: {highlighted_word} (info gain: {recommended_info_gain:.2f} bits)')
                         else:
                             # User rejected previous recommendation - find next best
                             # Sort words by score (frequency) and evaluate top candidates
@@ -1198,26 +1230,13 @@ def main() -> None:
                             ai_recommended = available[0][0]
                             recommended_info_gain = available[0][1]
                             remaining = len(available)
-                            print(f'Next recommendation: "{ai_recommended}" (info gain: {recommended_info_gain:.2f} bits) [{remaining} options left]')
+                            highlighted_word = f"{Colors.HIGHLIGHT}{ai_recommended.upper()}{Colors.RESET}"
+                            print(f'Next recommendation: {highlighted_word} (info gain: {recommended_info_gain:.2f} bits) [{remaining} options left]')
 
-                        user_input = input(f"{i} | Guess (Enter=accept, n=next): ")
-
-                        if user_input.lower() in ["n", "next"]:
-                            rejected_words.add(ai_recommended)
-                            print(f'Rejected "{ai_recommended}", finding next best...')
-                            continue
-                        elif not user_input:
-                            guess = ai_recommended
-                            last_guess_info_gain = recommended_info_gain
-                            print(f'{i} | Using AI recommendation: "{guess}"')
-                        elif user_input.lower() in ["q", "quit"]:
-                            guess = user_input  # Will be handled by quit check below
-                        elif user_input.lower() in ["m", "more"]:
-                            guess = user_input  # Will be handled by more check below
-                        else:
-                            guess = user_input
-                            # Calculate info gain for user's guess
-                            last_guess_info_gain = info_gain_calc.calculate_information_gain(guess, wb.wordlist)
+                        # Auto-accept AI recommendation
+                        guess = ai_recommended
+                        last_guess_info_gain = recommended_info_gain
+                        break  # Exit the recommendation loop
 
                 except Exception as e:
                     print(f"Error calculating optimal first guess: {e}")
@@ -1365,19 +1384,20 @@ def main() -> None:
                                 # Display AI recommendation
                                 if recommendation:
                                     if verbose:
-                                        ai_display.display_ai_recommendation_verbose(
+                                        print(ai_display.display_ai_recommendation_verbose(
                                             word=recommendation.get('word', best_word),
                                             info_gain=recommendation.get('info_gain', best_info_gain),
                                             reasoning=recommendation.get('reasoning', ''),
                                             alternatives=recommendation.get('alternatives', []),
                                             metrics=recommendation.get('metrics', {}),
                                             config=wb.config
-                                        )
+                                        ))
                                     else:
-                                        ai_display.display_ai_recommendation_normal(
+                                        print(ai_display.display_ai_recommendation_normal(
                                             word=recommendation.get('word', best_word),
-                                            info_gain=recommendation.get('info_gain', best_info_gain)
-                                        )
+                                            info_gain=recommendation.get('info_gain', best_info_gain),
+                                            config=wb.config
+                                        ))
 
                                     ai_recommended = recommendation.get('word', best_word)
                                     recommended_info_gain = recommendation.get('info_gain', best_info_gain)
@@ -1386,7 +1406,8 @@ def main() -> None:
                                     ai_recommended = best_word
                                     recommended_info_gain = best_info_gain
                                     insight_marker = " [INSIGHT]" if best_word in insight_words else ""
-                                    print(f"AI recommendation (fallback): {best_word} (info gain: {best_info_gain:.2f} bits){insight_marker}")
+                                    highlighted_word = f"{Colors.HIGHLIGHT}{best_word.upper()}{Colors.RESET}"
+                                    print(f"AI recommendation (fallback): {highlighted_word} (info gain: {best_info_gain:.2f} bits){insight_marker}")
 
                             except Exception as e:
                                 print(f"Claude API error: {e}")
@@ -1397,33 +1418,21 @@ def main() -> None:
                                 ai_recommended = best_word
                                 recommended_info_gain = best_info_gain
                                 insight_marker = " [INSIGHT]" if best_word in insight_words else ""
-                                print(f"AI recommendation (fallback): {best_word} (info gain: {best_info_gain:.2f} bits){insight_marker}")
+                                highlighted_word = f"{Colors.HIGHLIGHT}{best_word.upper()}{Colors.RESET}"
+                                print(f"AI recommendation (fallback): {highlighted_word} (info gain: {best_info_gain:.2f} bits){insight_marker}")
                         else:
                             # For rejected words, just use info gain ranking
                             ai_recommended = best_word
                             recommended_info_gain = best_info_gain
                             remaining = len(available_candidates)
                             insight_marker = " [INSIGHT]" if best_word in insight_words else ""
-                            print(f"Next recommendation: {best_word} (info gain: {best_info_gain:.2f} bits) [{remaining} options left]{insight_marker}")
+                            highlighted_word = f"{Colors.HIGHLIGHT}{best_word.upper()}{Colors.RESET}"
+                            print(f"Next recommendation: {highlighted_word} (info gain: {best_info_gain:.2f} bits) [{remaining} options left]{insight_marker}")
 
-                        user_input = input(f"{i} | Guess (Enter=accept, n=next): ")
-
-                        if user_input.lower() in ["n", "next"]:
-                            rejected_words.add(ai_recommended)
-                            print(f'Rejected "{ai_recommended}", finding next best...')
-                            continue
-                        elif not user_input:
-                            guess = ai_recommended
-                            last_guess_info_gain = recommended_info_gain
-                            print(f'{i} | Using AI recommendation: "{guess}"')
-                        elif user_input.lower() in ["q", "quit"]:
-                            guess = user_input  # Will be handled by quit check below
-                        elif user_input.lower() in ["m", "more"]:
-                            guess = user_input  # Will be handled by more check below
-                        else:
-                            guess = user_input
-                            # Calculate info gain for user's guess
-                            last_guess_info_gain = info_gains.get(guess, 0.0)
+                        # Auto-accept AI recommendation
+                        guess = ai_recommended
+                        last_guess_info_gain = recommended_info_gain
+                        break  # Exit the recommendation loop
 
                 except Exception as e:
                     print(f"Error during AI recommendation: {e}")
@@ -1487,11 +1496,6 @@ def main() -> None:
                 print(f"{i} | {wb.display_candidates(solutions, max_display)}")
             elif ai_components and len(solutions) <= ai_auto_show_threshold:
                 print(f"{i} | {wb.display_candidates(solutions, max_display, show_all=True)}")
-
-            # Auto-switch to hard mode when candidates drop below 10
-            if ai_components and ai_components.get('insight_mode') and len(solutions) < 10 and len(solutions) > 1:
-                ai_components['insight_mode'] = False
-                print("Auto-switched to hard mode (< 10 candidates remaining)")
 
             if len(solutions) <= 1:
                 if len(solutions) == 1:
