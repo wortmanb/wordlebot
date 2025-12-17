@@ -1,17 +1,20 @@
 """
-Information Gain Calculator for Wordlebot
+Information Gain Calculator for Wordlebot v2.0
 
 Implements Shannon entropy calculation and information gain analysis
 for optimal Wordle guess selection using information theory.
 
+V2.0 Key Improvement:
+- Calculate information gain against SOLUTIONS ONLY (~2,315 words)
+- Evaluate guesses from FULL VOCABULARY (~12,972 words)
+- This allows "insight" guesses that maximize information gain
+  even if the guess word itself can't be the answer
+
 Performance Notes:
-- Single information gain calculation: ~0.002s for 2000 candidates
-- Full first guess optimization: ~0.25s for 500 words, ~4-5s for 2000 words
+- Single information gain calculation: ~0.001s for 2,315 candidates
+- Full first guess optimization: ~15s for 2,315 solutions x 12,972 vocabulary
 - Caching significantly improves repeated calculations
-- For production use with large wordlists (>2000), consider:
-  - Pre-computing optimal first guess offline
-  - Using a curated subset of common words (~2315 actual Wordle answers)
-  - Implementing parallel processing for initial guess calculation
+- Pre-computed decision trees eliminate first guess calculation at runtime
 """
 import math
 from collections import defaultdict
@@ -181,23 +184,80 @@ class InformationGainCalculator:
 
         return info_gain
 
-    def get_best_first_guess(self, wordlist: List[str], show_progress: bool = False) -> str:
+    def get_best_guess(
+        self,
+        solutions: List[str],
+        vocabulary: Optional[List[str]] = None,
+        show_progress: bool = False,
+    ) -> Tuple[str, float]:
         """
-        Calculate the optimal first guess by evaluating information gain for all words.
+        V2.0: Calculate the optimal guess by evaluating vocabulary against solutions.
 
-        This method evaluates every word in the wordlist as a potential first guess,
-        calculating how much information each would provide on average. This is
-        computationally intensive but only needs to be done once per session.
-
-        Performance: ~0.25s for 500 words, ~4-5s for 2000 words
-        For large wordlists, consider pre-computing offline or using a curated subset.
+        This method evaluates words from the vocabulary, calculating how much
+        information each would provide about the SOLUTION set. This enables
+        "insight" guesses - words that can't be the answer but reveal more info.
 
         Args:
-            wordlist: Complete list of valid Wordle words
+            solutions: List of possible solution words (what we're trying to guess)
+            vocabulary: Words to evaluate as guesses (default: same as solutions)
             show_progress: If True, display progress indicator during calculation
 
         Returns:
-            The word with maximum information gain (e.g., "place" for standard Wordle)
+            Tuple of (best_word, info_gain)
+        """
+        if not solutions:
+            raise ValueError("Solutions list cannot be empty")
+
+        if len(solutions) == 1:
+            return solutions[0], 0.0
+
+        # Default vocabulary to solutions if not provided
+        if vocabulary is None:
+            vocabulary = solutions
+
+        if show_progress:
+            print(f"Evaluating {len(vocabulary)} words against {len(solutions)} solutions...")
+            print("This may take a moment...", flush=True)
+
+        best_word = solutions[0]
+        best_info_gain = 0.0
+
+        for i, word in enumerate(vocabulary):
+            # Calculate info gain against solutions, not vocabulary
+            info_gain = self.calculate_information_gain(word, solutions)
+
+            if info_gain > best_info_gain:
+                best_info_gain = info_gain
+                best_word = word
+
+            if show_progress and (i + 1) % 500 == 0:
+                progress_pct = ((i + 1) / len(vocabulary)) * 100
+                print(f"  Progress: {i + 1}/{len(vocabulary)} words ({progress_pct:.0f}%)...", flush=True)
+
+        if show_progress:
+            print(f"✓ Best guess: {best_word.upper()} (info gain: {best_info_gain:.2f} bits)\n")
+
+        return best_word, best_info_gain
+
+    def get_best_first_guess(
+        self,
+        wordlist: List[str],
+        vocabulary: Optional[List[str]] = None,
+        show_progress: bool = False,
+    ) -> str:
+        """
+        Calculate the optimal first guess by evaluating information gain.
+
+        V2.0: Can now accept separate vocabulary for evaluation against
+        a solutions-only wordlist.
+
+        Args:
+            wordlist: List of possible solution words (what we're trying to guess)
+            vocabulary: Words to evaluate as guesses (default: same as wordlist)
+            show_progress: If True, display progress indicator during calculation
+
+        Returns:
+            The word with maximum information gain
         """
         if not wordlist:
             raise ValueError("Wordlist cannot be empty")
@@ -207,38 +267,62 @@ class InformationGainCalculator:
 
         # Check if we've cached the result for this wordlist size
         wordlist_size = len(wordlist)
-        if self._first_guess_cache and self._first_guess_cache[1] == wordlist_size:
+        vocab_size = len(vocabulary) if vocabulary else wordlist_size
+        cache_key = (wordlist_size, vocab_size)
+
+        if self._first_guess_cache and self._first_guess_cache[1] == cache_key:
             return self._first_guess_cache[0]
 
-        if show_progress:
-            print(f"Calculating optimal first guess from {wordlist_size} words...")
-            print("This may take a few seconds...", flush=True)
-
-        best_word = wordlist[0]
-        best_info_gain = 0.0
-
-        # Evaluate all words in the wordlist
-        # Note: This is computationally expensive (O(n²) where n ~= 2000+)
-        # but provides the mathematically optimal opening move
-        for i, word in enumerate(wordlist):
-            info_gain = self.calculate_information_gain(word, wordlist)
-
-            if info_gain > best_info_gain:
-                best_info_gain = info_gain
-                best_word = word
-
-            # Print progress indicator for long calculations
-            if show_progress and (i + 1) % 100 == 0:
-                progress_pct = ((i + 1) / len(wordlist)) * 100
-                print(f"  Progress: {i + 1}/{len(wordlist)} words ({progress_pct:.0f}%)...", flush=True)
-
-        if show_progress:
-            print(f"✓ Optimal first guess: {best_word.upper()} (info gain: {best_info_gain:.2f} bits)\n")
+        # Use the new get_best_guess method
+        best_word, best_info_gain = self.get_best_guess(
+            solutions=wordlist,
+            vocabulary=vocabulary,
+            show_progress=show_progress,
+        )
 
         # Cache the result
-        self._first_guess_cache = (best_word, wordlist_size)
+        self._first_guess_cache = (best_word, cache_key)
 
         return best_word
+
+    def rank_guesses(
+        self,
+        solutions: List[str],
+        vocabulary: Optional[List[str]] = None,
+        top_n: int = 20,
+        show_progress: bool = False,
+    ) -> List[Tuple[str, float]]:
+        """
+        V2.0: Rank all guesses by information gain against solutions.
+
+        Args:
+            solutions: List of possible solution words
+            vocabulary: Words to evaluate (default: solutions)
+            top_n: Number of top guesses to return
+            show_progress: If True, display progress indicator
+
+        Returns:
+            List of (word, info_gain) tuples, sorted by info gain descending
+        """
+        if not solutions:
+            return []
+
+        if vocabulary is None:
+            vocabulary = solutions
+
+        results = []
+
+        for i, word in enumerate(vocabulary):
+            info_gain = self.calculate_information_gain(word, solutions)
+            results.append((word, info_gain))
+
+            if show_progress and (i + 1) % 500 == 0:
+                print(f"  Ranked {i + 1}/{len(vocabulary)} words...", flush=True)
+
+        # Sort by info gain descending
+        results.sort(key=lambda x: x[1], reverse=True)
+
+        return results[:top_n]
 
     def clear_cache(self) -> None:
         """Clear the calculation cache (typically between games)"""

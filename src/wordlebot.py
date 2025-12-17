@@ -26,15 +26,25 @@ except ImportError:
 
 # Cache configuration
 CACHE_DIR = Path.home() / ".cache" / "wordlebot"
-WORDS_CACHE_FILE = CACHE_DIR / "words_v2.json"
+WORDS_CACHE_FILE = CACHE_DIR / "words_v2.json"  # Legacy combined cache
+SOLUTIONS_CACHE_FILE = CACHE_DIR / "solutions_v1.json"  # V2.0: Solutions only
+GUESSES_CACHE_FILE = CACHE_DIR / "guesses_v1.json"  # V2.0: Guess-only words
 CACHE_MAX_AGE_SECONDS = 86400 * 7  # 7 days
 
 # Handle imports for both script and installed package
 try:
     from src import env_manager
+    from src.positional_frequency import PositionalFrequencyScorer
+    from src.decision_tree import DecisionTree
 except ModuleNotFoundError:
     # When running as installed package, module is at top level
     import env_manager
+    try:
+        from positional_frequency import PositionalFrequencyScorer
+        from decision_tree import DecisionTree
+    except ImportError:
+        PositionalFrequencyScorer = None
+        DecisionTree = None
 
 HOME: str = str(Path.home())
 
@@ -263,12 +273,27 @@ class Wordlebot:
         self._init_elasticsearch()
 
         # Initialize data containers
-        self.wordlist: List[str] = []
+        # V2.0: Dual word list system
+        self.solutions: List[str] = []  # Words that can be Wordle answers (~2,315)
+        self.guesses_only: List[str] = []  # Additional valid guess words (~10,657)
+        self.wordlist: List[str] = []  # Combined list (backward compatibility)
         self.word_frequencies: Dict[str, int] = {}
 
-        # Load word list and frequencies (from cache, ES, or files)
+        # V2.0: Positional frequency scorer
+        self.positional_scorer: Optional[PositionalFrequencyScorer] = None
+
+        # V2.0: Decision tree for pre-computed guesses
+        self.decision_tree: Optional[DecisionTree] = None
+
+        # Load word lists (solutions + guesses from cache, ES, or files)
         self._load_wordlist()
         self._load_coca_frequency()
+
+        # V2.0: Initialize positional scorer from solutions
+        self._init_positional_scorer()
+
+        # V2.0: Load decision tree if enabled
+        self._init_decision_tree()
 
         # Load previous Wordle words
         self.previous_words: Set[str] = set()
@@ -325,17 +350,97 @@ class Wordlebot:
             self.es_client = None
 
     def _load_wordlist(self) -> None:
-        """Load wordlist using hybrid approach: local cache with ES as source of truth."""
-        # Strategy: Use local cache for fast in-memory filtering
-        # Refresh cache from ES when stale or missing
+        """
+        V2.0: Load dual word lists (solutions + guesses).
 
+        Strategy:
+        1. Try to load v2.0 solutions/guesses files first
+        2. Fall back to legacy wordlist if v2.0 files not available
+        3. Populate self.solutions, self.guesses_only, and self.wordlist
+        """
+        # V2.0: Try to load dual word lists
+        if self._load_dual_wordlists():
+            return
+
+        # Legacy fallback: load combined wordlist
+        self._load_legacy_wordlist()
+
+    def _load_dual_wordlists(self) -> bool:
+        """
+        V2.0: Load solutions and guesses as separate lists.
+
+        Returns:
+            True if dual lists loaded successfully
+        """
+        files_config = self.config.get("files", {})
+        encoding = self.config["defaults"]["file_encoding"]
+
+        # Check for solutions file path in config
+        solutions_path_str = files_config.get("solutions")
+        guesses_path_str = files_config.get("guesses")
+
+        if not solutions_path_str:
+            if self.debug:
+                print("No solutions file configured, using legacy wordlist")
+            return False
+
+        solutions_path = Path(resolve_path(solutions_path_str))
+        guesses_path = Path(resolve_path(guesses_path_str)) if guesses_path_str else None
+
+        # Check if solutions file exists
+        if not solutions_path.exists():
+            if self.debug:
+                print(f"Solutions file not found: {solutions_path}")
+            return False
+
+        try:
+            # Load solutions
+            with open(solutions_path, "r", encoding=encoding) as f:
+                self.solutions = [
+                    word.strip().lower()
+                    for word in f
+                    if word.strip() and len(word.strip()) == 5
+                ]
+
+            if self.debug:
+                print(f"Loaded {len(self.solutions)} solution words from {solutions_path}")
+
+            # Load guess-only words if available
+            if guesses_path and guesses_path.exists():
+                with open(guesses_path, "r", encoding=encoding) as f:
+                    self.guesses_only = [
+                        word.strip().lower()
+                        for word in f
+                        if word.strip() and len(word.strip()) == 5
+                    ]
+                if self.debug:
+                    print(f"Loaded {len(self.guesses_only)} guess-only words from {guesses_path}")
+
+            # Build combined wordlist for backward compatibility
+            # Solutions come first (they're the primary candidates)
+            self.wordlist = self.solutions + self.guesses_only
+
+            if self.debug:
+                print(f"Total vocabulary: {len(self.wordlist)} words")
+
+            return True
+
+        except Exception as e:
+            if self.debug:
+                print(f"Error loading dual wordlists: {e}")
+            return False
+
+    def _load_legacy_wordlist(self) -> None:
+        """Load legacy combined wordlist (backward compatibility)."""
         # Check local cache first
         if is_cache_valid(WORDS_CACHE_FILE):
             cached = load_words_from_cache(WORDS_CACHE_FILE)
             if cached:
                 self.wordlist, self.word_frequencies = cached
+                # In legacy mode, solutions = wordlist
+                self.solutions = self.wordlist
                 if self.debug:
-                    print(f"Loaded {len(self.wordlist)} words from cache (in-memory filtering)")
+                    print(f"Loaded {len(self.wordlist)} words from legacy cache")
                 return
 
         # Cache miss or stale - try to refresh from ES
@@ -372,6 +477,7 @@ class Wordlebot:
                 self.es_client.clear_scroll(scroll_id=scroll_id)
 
                 self.wordlist = words
+                self.solutions = words  # Legacy: all words are potential solutions
                 self.word_frequencies = frequencies
 
                 # Save to cache for next time
@@ -380,20 +486,23 @@ class Wordlebot:
                         print(f"Cached {len(words)} words to {WORDS_CACHE_FILE}")
 
                 if self.debug:
-                    print(f"Loaded {len(self.wordlist)} words from ES (cached for future)")
+                    print(f"Loaded {len(self.wordlist)} words from ES (legacy mode)")
                 return
 
             except Exception as e:
                 if self.debug:
                     print(f"Error fetching from ES: {e}, falling back to file")
 
-        # Final fallback: load from local files
+        # Final fallback: load from local file
         wordlist_path = resolve_path(self.config["files"]["wordlist"])
         with open(wordlist_path, "r", encoding=self.config["defaults"]["file_encoding"]) as f:
             self.wordlist = [word.strip().lower() for word in f if len(word.strip()) == 5]
 
+        # Legacy: all words are potential solutions
+        self.solutions = self.wordlist
+
         if self.debug:
-            print(f"Loaded {len(self.wordlist)} words from file")
+            print(f"Loaded {len(self.wordlist)} words from file (legacy mode)")
 
     def _load_coca_frequency(self) -> None:
         """Load COCA frequency data (frequencies are loaded with wordlist cache)."""
@@ -451,6 +560,72 @@ class Wordlebot:
             if self.debug:
                 print(f"Warning: Could not load previous words: {e}")
 
+    def _init_positional_scorer(self) -> None:
+        """V2.0: Initialize positional frequency scorer from solutions."""
+        if PositionalFrequencyScorer is None:
+            if self.debug:
+                print("PositionalFrequencyScorer not available")
+            return
+
+        pos_config = self.config.get("positional_scoring", {})
+        if not pos_config.get("enabled", True):
+            if self.debug:
+                print("Positional scoring disabled in config")
+            return
+
+        if not self.solutions:
+            if self.debug:
+                print("No solutions loaded, skipping positional scorer")
+            return
+
+        try:
+            cache_path_str = pos_config.get("cache_file")
+            cache_path = Path(resolve_path(cache_path_str)) if cache_path_str else None
+            weight = pos_config.get("weight", 0.3)
+
+            self.positional_scorer = PositionalFrequencyScorer(
+                solutions=self.solutions,
+                cache_file=cache_path,
+                weight=weight,
+            )
+
+            if self.debug:
+                print(f"Initialized positional scorer from {len(self.solutions)} solutions")
+
+        except Exception as e:
+            if self.debug:
+                print(f"Warning: Could not initialize positional scorer: {e}")
+
+    def _init_decision_tree(self) -> None:
+        """V2.0: Initialize decision tree for pre-computed guesses."""
+        if DecisionTree is None:
+            if self.debug:
+                print("DecisionTree not available")
+            return
+
+        dt_config = self.config.get("decision_tree", {})
+        if not dt_config.get("enabled", True):
+            if self.debug:
+                print("Decision tree disabled in config")
+            return
+
+        try:
+            cache_path_str = dt_config.get("cache_file")
+            cache_path = Path(resolve_path(cache_path_str)) if cache_path_str else None
+
+            self.decision_tree = DecisionTree(cache_file=cache_path)
+
+            if self.decision_tree.is_ready():
+                if self.debug:
+                    print("Loaded decision tree from cache")
+            else:
+                if self.debug:
+                    print("Decision tree not pre-computed (run precompute_decision_tree.py)")
+
+        except Exception as e:
+            if self.debug:
+                print(f"Warning: Could not initialize decision tree: {e}")
+
     def guess(self, word: str) -> None:
         """Record a guess"""
         self.guess_number += 1
@@ -504,16 +679,22 @@ class Wordlebot:
             )
 
     def solve(self, response: str) -> List[str]:
-        """Process response and return matching candidates"""
+        """
+        V2.0: Process response and return matching candidates.
+
+        Key change: Filter against SOLUTIONS only, not full wordlist.
+        This ensures we only return words that can actually be the answer.
+        """
         self.assess(response)
 
-        # Always use fast in-memory filtering (wordlist is cached locally)
+        # V2.0: Filter against solutions only (not guess-only words)
+        # This is the key improvement - we only consider actual answer words
         candidates = []
-        for word in self.wordlist:
+        for word in self.solutions:
             if self._matches(word):
                 candidates.append(word)
 
-        # Sort by score (frequency)
+        # Sort by score (frequency + positional scoring)
         candidates.sort(key=lambda w: self.score_word(w), reverse=True)
 
         # Exclude previous words if configured
@@ -669,9 +850,23 @@ class Wordlebot:
         return True
 
     def score_word(self, word: str) -> float:
-        """Score word based on COCA frequency and letter diversity"""
+        """
+        V2.0: Score word based on COCA frequency, positional frequency, and letter diversity.
+
+        Combines multiple scoring signals:
+        1. COCA frequency (general English usage)
+        2. Positional letter frequency (Wordle-specific)
+        3. Unique letters bonus
+        """
         # Get COCA frequency score
         freq_score = self.word_frequencies.get(word, 0)
+
+        # V2.0: Add positional frequency scoring
+        if self.positional_scorer:
+            freq_score = self.positional_scorer.score_word_weighted(
+                word,
+                base_score=freq_score,
+            )
 
         # Apply bonus for unique letters
         unique_letters = len(set(word))
@@ -1057,26 +1252,46 @@ def main() -> None:
 
                     if insight_mode and len(current_candidates) > 2:
                         # Insight mode: evaluate words from full wordlist for max information
-                        # Use a hybrid sampling strategy:
+                        # V2.0 Enhanced sampling strategy:
                         # 1. All current candidates (to compare insight vs hard mode)
                         # 2. Top frequent words (common words are good for insight)
-                        # 3. Words with diverse unique letters (for maximum info gain potential)
+                        # 3. Words with 5 unique letters (for maximum info gain potential)
+                        # 4. NEW: Words with letters that distinguish between candidates
                         words_to_evaluate_set: Set[str] = set()
 
                         # Include all candidates
                         words_to_evaluate_set.update(current_candidates)
 
-                        # Add top 200 by frequency
+                        # Add top 300 by frequency (increased from 200)
                         sorted_by_freq = sorted(
                             wb.wordlist, key=lambda w: wb.score_word(w), reverse=True
                         )
-                        words_to_evaluate_set.update(sorted_by_freq[:200])
+                        words_to_evaluate_set.update(sorted_by_freq[:300])
 
                         # Add words with 5 unique letters (often best for info gain)
                         unique_letter_words = [w for w in wb.wordlist if len(set(w)) == 5]
                         # Prioritize by frequency among unique-letter words
                         unique_letter_words.sort(key=lambda w: wb.score_word(w), reverse=True)
-                        words_to_evaluate_set.update(unique_letter_words[:200])
+                        words_to_evaluate_set.update(unique_letter_words[:300])
+
+                        # V2.0: Add words that contain distinguishing letters
+                        # Find letters that vary across candidates (good for discrimination)
+                        if len(current_candidates) <= 50:
+                            distinguishing_letters: Set[str] = set()
+                            for pos in range(5):
+                                letters_at_pos = set(c[pos] for c in current_candidates)
+                                if len(letters_at_pos) > 1:
+                                    distinguishing_letters.update(letters_at_pos)
+
+                            # Find words containing multiple distinguishing letters
+                            if distinguishing_letters:
+                                for word in wb.wordlist:
+                                    word_letters = set(word)
+                                    overlap = len(word_letters & distinguishing_letters)
+                                    if overlap >= 3:  # Word has 3+ distinguishing letters
+                                        words_to_evaluate_set.add(word)
+                                        if len(words_to_evaluate_set) > 1000:
+                                            break  # Cap total evaluation set
 
                         words_to_evaluate = list(words_to_evaluate_set)
                         print(f"Insight mode: Calculating information gain for {len(words_to_evaluate)} words...", flush=True)

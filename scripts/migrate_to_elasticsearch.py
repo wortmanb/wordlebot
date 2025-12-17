@@ -1,26 +1,33 @@
 #!/usr/bin/env python3
 """
-Migrate Wordlebot dictionaries to Elasticsearch.
+Wordlebot v2.0 - Migrate dictionaries to Elasticsearch.
 
 This script:
 1. Retrieves the ES API key from Vault
-2. Creates optimized indices for Wordle-style queries
+2. Creates separate indices for solutions and guesses (v2.0)
 3. Bulk-loads the data with pre-indexed letter positions
 
-Index Schema (v2 - Optimized):
+V2.0 Index Schema:
 - word: the 5-letter word
 - p0-p4: letter at each position (for green letter matching)
 - letters: sorted unique letters in the word (for contains/excludes queries)
 - letter_counts: object with count of each letter (for min/max count constraints)
 - freq: COCA frequency score (for ranking)
+- is_solution: boolean indicating if word can be a Wordle answer
+
+Indices:
+- wordlebot-solutions: ~2,315 answer words
+- wordlebot-guesses: ~10,657 guess-only words
+- wordlebot-words-v2: Legacy combined index (optional)
 """
 
+import argparse
 import csv
 import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Generator, List, Optional
 
 try:
     from elasticsearch import Elasticsearch
@@ -36,12 +43,16 @@ ES_HOST = "https://elasticsearch.bwortman.us"
 VAULT_PATH = "secret/homelab/elasticsearch/api-keys"
 VAULT_KEY = "lab_es_api_key"
 
-# Index name (single unified index)
-WORDLIST_INDEX = "wordlebot-words-v2"
+# V2.0 Index names
+SOLUTIONS_INDEX = "wordlebot-solutions"
+GUESSES_INDEX = "wordlebot-guesses"
+LEGACY_INDEX = "wordlebot-words-v2"
 
 # Data file paths (relative to repo root)
 REPO_ROOT = Path(__file__).parent.parent
-WORDLIST_FILE = REPO_ROOT / "data" / "wordlist_fives.txt"
+SOLUTIONS_FILE = REPO_ROOT / "data" / "wordle_solutions.txt"
+GUESSES_FILE = REPO_ROOT / "data" / "wordle_guesses.txt"
+LEGACY_WORDLIST_FILE = REPO_ROOT / "data" / "wordlist_fives.txt"
 COCA_FILE = REPO_ROOT / "data" / "coca_frequency.csv"
 
 
@@ -90,158 +101,228 @@ def load_coca_frequencies() -> Dict[str, int]:
     return frequencies
 
 
-def create_index(es: Elasticsearch) -> None:
-    """Create optimized Elasticsearch index for Wordle queries."""
+def get_index_mapping(include_is_solution: bool = True) -> dict:
+    """Get the optimized Elasticsearch mapping for Wordle queries."""
+    properties = {
+        # The word itself
+        "word": {"type": "keyword"},
 
-    # Optimized mapping for Wordle-style queries
-    mapping = {
-        "mappings": {
-            "properties": {
-                # The word itself
-                "word": {"type": "keyword"},
+        # Individual letter positions (for green letter matching)
+        "p0": {"type": "keyword"},
+        "p1": {"type": "keyword"},
+        "p2": {"type": "keyword"},
+        "p3": {"type": "keyword"},
+        "p4": {"type": "keyword"},
 
-                # Individual letter positions (for green letter matching)
-                "p0": {"type": "keyword"},
-                "p1": {"type": "keyword"},
-                "p2": {"type": "keyword"},
-                "p3": {"type": "keyword"},
-                "p4": {"type": "keyword"},
+        # Sorted unique letters (for contains/must_not queries)
+        "letters": {"type": "keyword"},
 
-                # Sorted unique letters (for contains/must_not queries)
-                "letters": {"type": "keyword"},
-
-                # Letter counts for each letter present (for min/max constraints)
-                # Stored as nested for precise querying
-                "letter_counts": {
-                    "type": "object",
-                    "enabled": True
-                },
-
-                # COCA frequency for scoring/sorting
-                "freq": {"type": "long"}
-            }
+        # Letter counts for each letter present (for min/max constraints)
+        "letter_counts": {
+            "type": "object",
+            "enabled": True
         },
+
+        # COCA frequency for scoring/sorting
+        "freq": {"type": "long"}
+    }
+
+    # V2.0: Add is_solution field
+    if include_is_solution:
+        properties["is_solution"] = {"type": "boolean"}
+
+    return {
+        "mappings": {"properties": properties},
         "settings": {
             "number_of_shards": 1,
             "number_of_replicas": 0,
-            "index": {
-                "refresh_interval": "1s"
-            }
+            "index": {"refresh_interval": "1s"}
         }
     }
 
-    # Create or recreate index
-    if es.indices.exists(index=WORDLIST_INDEX):
-        print(f"Deleting existing index: {WORDLIST_INDEX}")
-        es.indices.delete(index=WORDLIST_INDEX)
 
-    print(f"Creating index: {WORDLIST_INDEX}")
-    es.indices.create(index=WORDLIST_INDEX, body=mapping)
+def create_index(es: Elasticsearch, index_name: str, include_is_solution: bool = True) -> None:
+    """Create or recreate an Elasticsearch index."""
+    mapping = get_index_mapping(include_is_solution)
+
+    if es.indices.exists(index=index_name):
+        print(f"  Deleting existing index: {index_name}")
+        es.indices.delete(index=index_name)
+
+    print(f"  Creating index: {index_name}")
+    es.indices.create(index=index_name, body=mapping)
 
 
-def load_words(es: Elasticsearch, frequencies: Dict[str, int]) -> int:
-    """Load wordlist with optimized fields into Elasticsearch."""
+def load_wordlist_file(filepath: Path) -> List[str]:
+    """Load words from a file."""
+    if not filepath.exists():
+        return []
 
-    def generate_actions():
-        with open(WORDLIST_FILE, "r", encoding="utf-8") as f:
-            for line in f:
-                word = line.strip().lower()
-                if len(word) == 5:
-                    # Count letters
-                    letter_counts = dict(Counter(word))
+    with open(filepath, "r", encoding="utf-8") as f:
+        return [line.strip().lower() for line in f if line.strip() and len(line.strip()) == 5]
 
-                    yield {
-                        "_index": WORDLIST_INDEX,
-                        "_source": {
-                            "word": word,
-                            # Position-indexed letters
-                            "p0": word[0],
-                            "p1": word[1],
-                            "p2": word[2],
-                            "p3": word[3],
-                            "p4": word[4],
-                            # Unique letters (sorted for consistency)
-                            "letters": sorted(set(word)),
-                            # Letter counts for constraint checking
-                            "letter_counts": letter_counts,
-                            # Frequency score (0 if not in COCA)
-                            "freq": frequencies.get(word, 0)
-                        }
-                    }
 
-    print(f"Loading wordlist from: {WORDLIST_FILE}")
+def generate_word_doc(
+    word: str,
+    frequencies: Dict[str, int],
+    index_name: str,
+    is_solution: Optional[bool] = None
+) -> dict:
+    """Generate an Elasticsearch document for a word."""
+    letter_counts = dict(Counter(word))
+
+    doc = {
+        "_index": index_name,
+        "_source": {
+            "word": word,
+            "p0": word[0],
+            "p1": word[1],
+            "p2": word[2],
+            "p3": word[3],
+            "p4": word[4],
+            "letters": sorted(set(word)),
+            "letter_counts": letter_counts,
+            "freq": frequencies.get(word, 0)
+        }
+    }
+
+    if is_solution is not None:
+        doc["_source"]["is_solution"] = is_solution
+
+    return doc
+
+
+def load_words_to_index(
+    es: Elasticsearch,
+    words: List[str],
+    frequencies: Dict[str, int],
+    index_name: str,
+    is_solution: Optional[bool] = None
+) -> int:
+    """Load words into an Elasticsearch index."""
+
+    def generate_actions() -> Generator[dict, None, None]:
+        for word in words:
+            yield generate_word_doc(word, frequencies, index_name, is_solution)
+
     success, failed = bulk(es, generate_actions(), stats_only=True, chunk_size=500)
-    print(f"  Loaded {success} words, {failed} failed")
     return success
 
 
-def verify_data(es: Elasticsearch) -> None:
-    """Verify data was loaded correctly and demonstrate query capabilities."""
+def verify_index(es: Elasticsearch, index_name: str) -> None:
+    """Verify an index and show sample data."""
+    es.indices.refresh(index=index_name)
+    count = es.count(index=index_name)["count"]
+    print(f"  {index_name}: {count} documents")
 
-    # Refresh index
-    es.indices.refresh(index=WORDLIST_INDEX)
-
-    # Count documents
-    count = es.count(index=WORDLIST_INDEX)["count"]
-    print(f"\nVerification:")
-    print(f"  {WORDLIST_INDEX}: {count} documents")
-
-    # Sample query - all words
-    print("\nSample words (by frequency):")
+    # Sample query
     result = es.search(
-        index=WORDLIST_INDEX,
-        body={"query": {"match_all": {}}, "size": 5, "sort": [{"freq": "desc"}]}
+        index=index_name,
+        body={"query": {"match_all": {}}, "size": 3, "sort": [{"freq": "desc"}]}
     )
+    print("  Sample words:")
     for hit in result["hits"]["hits"]:
         src = hit["_source"]
-        print(f"  - {src['word']}: freq={src['freq']}, letters={src['letters']}")
+        print(f"    - {src['word']}: freq={src['freq']}")
 
-    # Demo query: words with 's' at position 0
-    print("\nDemo: Words starting with 's' (first 5):")
+
+def migrate_v2_separate(es: Elasticsearch, frequencies: Dict[str, int]) -> None:
+    """V2.0: Migrate to separate solutions and guesses indices."""
+    print("\nV2.0 Migration: Separate Solutions and Guesses Indices")
+    print("-" * 55)
+
+    # Load word lists
+    print("\nLoading word lists...")
+    solutions = load_wordlist_file(SOLUTIONS_FILE)
+    guesses = load_wordlist_file(GUESSES_FILE)
+
+    if not solutions:
+        print(f"  ERROR: Solutions file not found: {SOLUTIONS_FILE}")
+        print("  Run: python scripts/fetch_wordle_lists.py")
+        return
+
+    print(f"  Solutions: {len(solutions)} words from {SOLUTIONS_FILE}")
+    print(f"  Guesses: {len(guesses)} words from {GUESSES_FILE}")
+
+    # Create solutions index
+    print("\nCreating solutions index...")
+    create_index(es, SOLUTIONS_INDEX, include_is_solution=True)
+
+    print("Loading solutions...")
+    success = load_words_to_index(es, solutions, frequencies, SOLUTIONS_INDEX, is_solution=True)
+    print(f"  Loaded {success} solution words")
+
+    # Create guesses index
+    print("\nCreating guesses index...")
+    create_index(es, GUESSES_INDEX, include_is_solution=True)
+
+    print("Loading guesses...")
+    success = load_words_to_index(es, guesses, frequencies, GUESSES_INDEX, is_solution=False)
+    print(f"  Loaded {success} guess-only words")
+
+    # Verify
+    print("\nVerification:")
+    verify_index(es, SOLUTIONS_INDEX)
+    verify_index(es, GUESSES_INDEX)
+
+
+def migrate_legacy(es: Elasticsearch, frequencies: Dict[str, int]) -> None:
+    """Migrate legacy combined index (backward compatibility)."""
+    print("\nLegacy Migration: Combined Index")
+    print("-" * 35)
+
+    # Load words from legacy file
+    print(f"\nLoading words from {LEGACY_WORDLIST_FILE}...")
+    words = load_wordlist_file(LEGACY_WORDLIST_FILE)
+
+    if not words:
+        print(f"  WARNING: Legacy wordlist not found: {LEGACY_WORDLIST_FILE}")
+        return
+
+    print(f"  Found {len(words)} words")
+
+    # Create legacy index
+    print("\nCreating legacy index...")
+    create_index(es, LEGACY_INDEX, include_is_solution=False)
+
+    print("Loading words...")
+    success = load_words_to_index(es, words, frequencies, LEGACY_INDEX, is_solution=None)
+    print(f"  Loaded {success} words")
+
+    # Verify
+    print("\nVerification:")
+    verify_index(es, LEGACY_INDEX)
+
+
+def demo_queries(es: Elasticsearch) -> None:
+    """Demonstrate v2.0 query capabilities."""
+    print("\n" + "=" * 55)
+    print("V2.0 Query Demonstrations")
+    print("=" * 55)
+
+    # Demo 1: Query solutions only
+    print("\nDemo 1: Top 5 solution words by frequency")
     result = es.search(
-        index=WORDLIST_INDEX,
+        index=SOLUTIONS_INDEX,
         body={
-            "query": {"term": {"p0": "s"}},
+            "query": {"match_all": {}},
             "size": 5,
             "sort": [{"freq": "desc"}]
         }
     )
     for hit in result["hits"]["hits"]:
-        print(f"  - {hit['_source']['word']}")
+        print(f"  - {hit['_source']['word']} (freq={hit['_source']['freq']})")
 
-    # Demo query: words containing 'e' but not 'a'
-    print("\nDemo: Words containing 'e' but not 'a' (first 5):")
+    # Demo 2: Wordle-style query on solutions
+    print("\nDemo 2: Solutions starting with 's', containing 'e' (top 5)")
     result = es.search(
-        index=WORDLIST_INDEX,
-        body={
-            "query": {
-                "bool": {
-                    "must": [{"term": {"letters": "e"}}],
-                    "must_not": [{"term": {"letters": "a"}}]
-                }
-            },
-            "size": 5,
-            "sort": [{"freq": "desc"}]
-        }
-    )
-    for hit in result["hits"]["hits"]:
-        print(f"  - {hit['_source']['word']}")
-
-    # Demo query: Wordle-style - 's' at pos 0, contains 'e', excludes 'l','a','t'
-    print("\nDemo: Wordle query - S_??E pattern, excludes 'l','a','t' (first 5):")
-    result = es.search(
-        index=WORDLIST_INDEX,
+        index=SOLUTIONS_INDEX,
         body={
             "query": {
                 "bool": {
                     "must": [
                         {"term": {"p0": "s"}},
                         {"term": {"letters": "e"}}
-                    ],
-                    "must_not": [
-                        {"term": {"letters": "l"}},
-                        {"term": {"letters": "a"}},
-                        {"term": {"letters": "t"}}
                     ]
                 }
             },
@@ -250,13 +331,47 @@ def verify_data(es: Elasticsearch) -> None:
         }
     )
     for hit in result["hits"]["hits"]:
-        src = hit["_source"]
-        print(f"  - {src['word']} (freq={src['freq']})")
+        print(f"  - {hit['_source']['word']}")
+
+    # Demo 3: Cross-index search
+    print("\nDemo 3: All words (solutions + guesses) with 'q' (rare letter)")
+    result = es.search(
+        index=f"{SOLUTIONS_INDEX},{GUESSES_INDEX}",
+        body={
+            "query": {"term": {"letters": "q"}},
+            "size": 10,
+            "sort": [{"freq": "desc"}]
+        }
+    )
+    for hit in result["hits"]["hits"]:
+        is_sol = hit["_source"].get("is_solution", "?")
+        marker = "[SOL]" if is_sol else "[GUESS]"
+        print(f"  - {hit['_source']['word']} {marker}")
 
 
 def main():
-    print("Wordlebot Dictionary Migration to Elasticsearch (v2 - Optimized)")
-    print("=" * 65)
+    parser = argparse.ArgumentParser(
+        description="Wordlebot v2.0 - Migrate dictionaries to Elasticsearch"
+    )
+    parser.add_argument(
+        "--legacy-only",
+        action="store_true",
+        help="Only migrate legacy combined index"
+    )
+    parser.add_argument(
+        "--v2-only",
+        action="store_true",
+        help="Only migrate v2.0 separate indices"
+    )
+    parser.add_argument(
+        "--skip-demo",
+        action="store_true",
+        help="Skip query demonstrations"
+    )
+    args = parser.parse_args()
+
+    print("Wordlebot v2.0 - Elasticsearch Migration")
+    print("=" * 45)
 
     # Get API key from Vault
     print("\nRetrieving API key from Vault...")
@@ -267,31 +382,38 @@ def main():
     print(f"\nConnecting to Elasticsearch at {ES_HOST}...")
     es = create_es_client(api_key)
 
-    # Test connection
     if not es.ping():
         print("Error: Could not connect to Elasticsearch")
         sys.exit(1)
     print("  Connected successfully")
 
-    # Load COCA frequencies first
+    # Load COCA frequencies
     print("\nLoading COCA frequency data...")
     frequencies = load_coca_frequencies()
     print(f"  Loaded {len(frequencies)} frequency entries")
 
-    # Create index
-    print("\nCreating optimized index...")
-    create_index(es)
+    # Migrate based on arguments
+    if args.legacy_only:
+        migrate_legacy(es, frequencies)
+    elif args.v2_only:
+        migrate_v2_separate(es, frequencies)
+    else:
+        # Default: migrate both
+        migrate_v2_separate(es, frequencies)
+        migrate_legacy(es, frequencies)
 
-    # Load data
-    print("\nLoading words with indexed fields...")
-    load_words(es, frequencies)
+    # Demo queries
+    if not args.skip_demo and not args.legacy_only:
+        demo_queries(es)
 
-    # Verify
-    verify_data(es)
-
-    print("\nMigration complete!")
-    print(f"\nNew index: {WORDLIST_INDEX}")
-    print("Update your config to use this index for optimized queries.")
+    print("\n" + "=" * 45)
+    print("Migration complete!")
+    print("\nIndices created:")
+    if not args.legacy_only:
+        print(f"  - {SOLUTIONS_INDEX}: Solution words (~2,315)")
+        print(f"  - {GUESSES_INDEX}: Guess-only words (~10,657)")
+    if not args.v2_only:
+        print(f"  - {LEGACY_INDEX}: Combined legacy index")
 
 
 if __name__ == "__main__":

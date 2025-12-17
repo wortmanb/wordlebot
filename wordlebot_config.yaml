@@ -4,7 +4,14 @@
 # File paths (used as fallback when Elasticsearch is disabled)
 files:
   # Path to the 5-letter word list (relative to HOME or absolute path)
+  # LEGACY: Full wordlist (16k words) - used as fallback
   wordlist: "git/wordlebot/data/wordlist_fives.txt"
+
+  # V2.0: Dual word list system
+  # Solutions: ~2,315 words that can be Wordle answers
+  solutions: "git/wordlebot/data/wordle_solutions.txt"
+  # Guesses: ~10,657 additional valid guess words (can't be answers)
+  guesses: "git/wordlebot/data/wordle_guesses.txt"
 
   # Path to the COCA frequency data (relative to HOME or absolute path)
   coca_frequency: "git/wordlebot/data/coca_frequency.csv"
@@ -30,11 +37,15 @@ elasticsearch:
     secret_path: "secret/homelab/elasticsearch/api-keys"
     key_field: "lab_es_api_key"
 
-  # Index name (unified v2 index with optimized schema)
+  # Index name (unified v2 index with optimized schema) - LEGACY
   index: "wordlebot-words-v2"
 
-  # Legacy index names (for fallback/migration)
+  # V2.0: Separate indices for solutions and guesses
   indices:
+    solutions: "wordlebot-solutions"    # ~2,315 answer words
+    guesses: "wordlebot-guesses"        # ~10,657 guess-only words
+    combined: "wordlebot-words-v2"      # Legacy combined index (fallback)
+    # Legacy indices (deprecated)
     wordlist: "wordlebot-wordlist"
     coca_frequency: "wordlebot-coca-frequency"
 
@@ -162,3 +173,30 @@ ai:
 
   # Auto-show all candidates when count is at or below this threshold
   auto_show_all_threshold: 10
+
+# V2.0: Decision Tree Pre-computation
+decision_tree:
+  # Enable pre-computed decision tree for first 1-2 guesses
+  enabled: true
+
+  # Cache file for pre-computed decision tree
+  cache_file: "~/.cache/wordlebot/decision_tree_v1.json"
+
+  # Pre-computed optimal first guess (calculated from 2,315 solutions)
+  # This is used when decision tree is not yet generated
+  optimal_first_guess: "salet"
+
+  # Depth of pre-computation (1 = first guess only, 2 = first two guesses)
+  depth: 2
+
+# V2.0: Positional Frequency Scoring
+positional_scoring:
+  # Enable position-aware letter frequency scoring
+  enabled: true
+
+  # Cache file for computed positional frequencies
+  cache_file: "~/.cache/wordlebot/positional_freq.json"
+
+  # Weight factor for positional frequency in scoring (0.0 to 1.0)
+  # Higher = more weight on positional frequency vs COCA frequency
+  weight: 0.3
